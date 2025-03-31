@@ -1,0 +1,6 @@
+My Design Preferences
+
+Design Style & Layout Preferences:
+I prefer a clean, modern aesthetic with strong visual hierarchy and a modular layout structure. Every piece of content should feel like its own self-contained thought, ideally separated into its own visual card, block, or container — rather than being part of a plain list with just line separators.
+Even when showing a lot of information, it should feel light and easy to digest, with intentional spacing and generous padding to give the design room to breathe. I prioritize clarity and compartmentalization over cramming. The goal is to help the user feel relaxed, never overwhelmed.
+Apple’s design style is a great reference: elegant but not overly minimalist, and always guiding the user gently with one idea per section. Bold headlines, icons or visuals, and clean segmentation are key. My layouts should feel thoughtfully paced — encouraging the user to digest content at their own rhythm.
