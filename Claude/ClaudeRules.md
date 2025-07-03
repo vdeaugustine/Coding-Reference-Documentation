@@ -5,3 +5,5 @@ We always want to try to get things done programmatically and through CLI tools.
 Document things as you do them. When we accomplish tasks, make sure to document it so there is a good trail of everything we have done and what we have failed and what works and what doesn't work. 
 
 When making changes to schemas for databases or anything like that, make sure all the documentation about those schema are up to date
+
+After you finish a task, end your response by telling me what my next steps should be
