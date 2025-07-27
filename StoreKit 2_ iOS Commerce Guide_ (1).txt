@@ -1,0 +1,1506 @@
+﻿StoreKit 2: A Comprehensive Guide for Modern iOS Development (iOS 17+)
+1. Introduction & Core Concepts
+StoreKit 2 represents a fundamental shift in how developers implement In-App Purchases (IAPs) and subscriptions within the Apple ecosystem. Introduced at WWDC 2021 1, it offers a modern, Swift-native API designed to simplify development, enhance security, and provide richer data compared to its predecessor, the original StoreKit (now often referred to as StoreKit 1) 1. This guide provides a comprehensive overview and reference for senior iOS developers working with StoreKit 2, focusing on native iOS development using Swift and SwiftUI for iOS 17 and later.
+1.1 What is StoreKit 2? Purpose and Benefits
+StoreKit 2 is Apple's framework for facilitating the sale of digital goods and services within apps across all Apple platforms 3. It handles the complexities of payment processing, product information retrieval, and transaction management, allowing developers to focus on their app's core experience 5.
+Key Benefits over StoreKit 1:
+* Swift-First Design: Leverages modern Swift features, notably async/await concurrency, simplifying asynchronous operations like fetching products and handling purchases, leading to cleaner, more readable code 1. This contrasts with StoreKit 1's reliance on delegates and callbacks 8.
+* Enhanced Security (JWS): Transactions are cryptographically signed by the App Store using the industry-standard JSON Web Signature (JWS) format 1. This provides stronger verification of transaction authenticity and integrity compared to the older receipt format 11.
+* Simplified Transaction Handling: Offers streamlined APIs for accessing transaction history (Transaction.all), current entitlements (Transaction.currentEntitlements), and the latest transaction status 1. Transactions are automatically available across a user's devices, reducing the need for manual restoration in many cases 1.
+* Rich Subscription Information: Provides detailed subscription status (SubscriptionInfo.Status), renewal information (RenewalInfo), and offer eligibility directly within the app 1. APIs return data consistent with the App Store Server API 3.
+* Improved Testing: Features robust local testing capabilities using .storekit configuration files in Xcode and the StoreKitTest framework, allowing simulation of various scenarios without needing App Store Connect initially 3.
+* SwiftUI Integration: Offers dedicated SwiftUI views (StoreView, ProductView, SubscriptionStoreView) and view modifiers for easier merchandising and purchase flow integration 2.
+* In-App Customer Support: Includes APIs for initiating refund requests (beginRefundRequest) and managing subscriptions directly within the app 3.
+While StoreKit 1 is deprecated 8, existing implementations will continue to function for now. However, all new features and enhancements are exclusive to StoreKit 2, making migration highly recommended for future development 8.
+1.2 Core Architecture: Purchase Flow
+Understanding the flow of a purchase is crucial. StoreKit 2, leveraging async/await, simplifies this significantly compared to the delegate-based patterns of StoreKit 1.
+
+
+
+
+
+
+
++-----------------+        +-----------------+        +-----------------+        +-----------------+
+| SwiftUI View | | StoreKit 2 | | App Store | | Your Server |
+| (e.g., Button) | | (Framework) | | (Payment/Auth) | | (Optional) |
++-----------------+        +-----------------+        +-----------------+        +-----------------+
+| | | |
+|-- User Taps Purchase ->| | |
+| |-- 1. product.purchase() ->| |
+| | |-- 2. Display Sheet -->| User Auth/Confirm
+| | |<- 3. Auth Result -----|
+| |<-- 4. PurchaseResult --| |
+| | (.success/.userCancelled/.pending) |
+|<-- Handle Result ------| | |
+| (Update UI, | | |
+| Verify Tx) | | |
+| | | |
+|-- Optional: Send JWS ->|------------------------------------------------->|-- 5. Verify JWS -> App Store Server API
+| | | |<-- 6. Validation Result <--
+|<-- Update Entitlement -|-------------------------------------------------|
+| | | |
+| | | |
+| | Transaction.updates | |
+| | (AsyncSequence) | |
+|<-- Listen for Updates -| | |
+| (Handle external tx, | | |
+| finish unfinished) | | |
+
+
+Flow Steps:
+1. Initiation: The user interacts with a UI element (e.g., a button in a SwiftUI view) triggering a call to product.purchase() on a fetched Product object 5.
+2. System Sheet: StoreKit presents a system-managed confirmation sheet, prompting the user to authenticate (Face ID, Touch ID, password) and confirm the purchase details (price, subscription terms) 21. This sheet should not be modified or replicated 22.
+3. App Store Interaction: StoreKit communicates securely with the App Store to process the payment and authorization 5.
+4. Result Delivery: The purchase() method returns asynchronously with a Product.PurchaseResult. This enum indicates the outcome:
+   * .success(VerificationResult<Transaction>): The purchase was successful. The result contains the Transaction object wrapped in a VerificationResult (either .verified or .unverified) 5.
+   * .userCancelled: The user explicitly cancelled the purchase via the system sheet 21.
+   * .pending: The purchase requires further action (e.g., Ask to Buy approval) 21. The app should update the UI accordingly and listen for the final transaction via Transaction.updates.
+5. Verification (Client & Server):
+   * Client-Side: StoreKit 2 automatically attempts to verify the transaction's JWS signature 1. The VerificationResult indicates success (.verified) or failure (.unverified). While convenient, relying solely on client-side verification is not recommended for granting entitlements due to potential manipulation on compromised devices 8.
+   * Server-Side (Recommended): For robust security and a single source of truth, the app should send the transaction's jwsRepresentation (or signedRepresentation) to your secure server 10. Your server then validates this JWS signature using Apple's public key and/or communicates with the App Store Server API to confirm the transaction's validity before granting entitlements 9.
+6. Entitlement & Finishing: Upon successful server-side verification (or client-side verification for low-risk scenarios), the app unlocks the purchased content or feature. Crucially, the app must then call await transaction.finish() to mark the transaction as processed 8. Failure to finish transactions can lead to them being repeatedly delivered by StoreKit 28.
+7. Ongoing Updates: A TransactionListener (iterating Transaction.updates) should be active from app launch to handle transactions completed outside the app (e.g., renewals, Ask to Buy approvals, offer code redemptions, purchases on other devices) and to process any unfinished transactions from previous sessions 5.
+1.3 Essential Terminology
+Understanding StoreKit 2's vocabulary is essential for effective implementation:
+* Product: A struct representing an In-App Purchase (consumable, non-consumable, auto-renewable subscription, non-renewing subscription) configured in App Store Connect or a .storekit file. It contains localized display information (name, description, price) and methods for purchasing 5.
+* Transaction: A struct representing a single, completed purchase or renewal event 5. It contains vital details like:
+   * id: Unique identifier for this specific transaction event.
+   * originalID: Identifier of the very first purchase transaction in a subscription series.
+   * productID: The identifier of the purchased Product.
+   * purchaseDate: The timestamp of the purchase.
+   * expiresDate: (For subscriptions) The date the subscription period ends.
+   * quantity: Number of items purchased (for consumables).
+   * jwsRepresentation: The App Store-signed JWS string containing the transaction details 9.
+   * revocationDate, revocationReason: Indicates if and why a transaction was refunded or revoked (e.g., customer support refund, Family Sharing revocation) 35.
+   * ownershipType: (For Family Sharing) Indicates if the transaction belongs to the purchaser or a family member 37.
+   * appAccountToken: An optional UUID provided during purchase to link the transaction to your app's user account system 1.
+* VerificationResult<T>: An enum wrapping StoreKit data (like Transaction or RenewalInfo) that has undergone automatic JWS validation. It has cases: .verified(T) and .unverified(T, VerificationError) 5.
+* SubscriptionInfo: Nested within Product, this struct provides details specific to auto-renewable subscriptions 5. Key properties include:
+   * subscriptionGroupID: The identifier of the group this subscription belongs to.
+   * groupLevel: The rank within the subscription group (used for upgrades/downgrades).
+   * subscriptionPeriod: The duration of the subscription period (e.g., 1 month).
+   * introductoryOffer, promotionalOffers, winBackOffers: Details about available offers.
+   * isEligibleForIntroOffer: A boolean indicating eligibility for an introductory offer within the group 42.
+   * status: An array of SubscriptionInfo.Status objects providing the current state(s) for the subscription group 14.
+* SubscriptionInfo.Status: Contains the renewal state and latest transaction/renewal info for a specific entitlement within a subscription group (multiple statuses can exist, e.g., personal purchase + family shared) 43.
+* RenewalInfo: Nested within SubscriptionInfo.Status, this struct provides details about the next renewal period 39. Key properties include:
+   * state: The current RenewalState of the subscription.
+   * willAutoRenew: Boolean indicating if auto-renew is enabled.
+   * autoRenewPreference: The productID the subscription will renew as (important for handling upgrades/downgrades) 44.
+   * renewalDate: The date the next renewal is expected or the current period expires.
+   * expirationReason: If expired, the reason why (e.g., billing issue, user cancelled).
+   * isInBillingRetry: Boolean indicating if the subscription is in the billing retry period 39.
+   * gracePeriodExpirationDate: If in a grace period, the date it expires 39.
+   * priceIncreaseStatus: Indicates if a price increase is pending or agreed upon 39.
+* RenewalState: An enum representing the possible states of an auto-renewable subscription entitlement: .subscribed, .expired, .inBillingRetryPeriod, .inGracePeriod, .revoked 11. This is crucial for determining service entitlement.
+* StoreKit Configuration file (.storekit): An Xcode file used for local testing. It allows defining products, subscription groups, offers, and simulating various scenarios (renewals, interruptions, failures, refunds) without connecting to App Store Connect servers 5.
+* Subscription Group: A collection of auto-renewable subscription products configured in App Store Connect. A user can typically only be actively subscribed to one product within a group at a time. Groups define upgrade, downgrade, and crossgrade behavior based on assigned levels 14.
+* App Store Server API: A REST API provided by Apple for server-side validation of transactions, checking subscription status, handling refunds, managing notifications, and more 4. It's the recommended approach for secure entitlement management.
+* App Store Server Notifications (V2): Webhooks sent from Apple's servers to your server to notify about real-time events like renewals, expirations, refunds, offer redemptions, billing issues, etc 6. Essential for maintaining accurate, up-to-date entitlement status on your server.
+1.4 App Store Connect Prerequisites
+Before implementing StoreKit 2, essential setup must be completed in App Store Connect (ASC):
+1. Paid Applications Agreement: Ensure the Account Holder has accepted the latest Paid Applications Agreement 50.
+2. Banking and Tax Information: Configure banking and tax details if not already done 53.
+3. Create In-App Purchases: Define each product (consumable, non-consumable, non-renewing subscription, auto-renewable subscription) you intend to sell 5. This involves:
+   * Type Selection: Choose the correct IAP type (Consumable, Non-Consumable, Auto-Renewable Subscription, Non-Renewing Subscription) 6.
+   * Reference Name: An internal name for ASC.
+   * Product ID: A unique, reverse-DNS style identifier (e.g., com.yourapp.premium_monthly) used in your code to fetch the product 50.
+   * Pricing: Select a price tier. Prices are automatically generated for other storefronts but can be customized 6.
+   * Localization: Provide localized display names and descriptions for different storefronts 54.
+   * Review Information: Add notes and a screenshot for App Review 54. The first IAP must be submitted with a new app version; subsequent ones can sometimes be submitted independently 54.
+4. Create Subscription Groups (for Auto-Renewable Subscriptions):
+   * Group related subscription products together (e.g., monthly, annual tiers of the same service) 48.
+   * Assign levels within the group to define upgrade/downgrade paths (Level 1 is highest) 49. A user can only have one active subscription per group 50.
+5. Configure Offers (Optional): Set up Introductory Offers (for new subscribers) and Promotional Offers or Offer Codes (for existing/lapsed subscribers) if needed 49.
+6. Enable Family Sharing (Optional): Turn on Family Sharing for non-consumables or auto-renewable subscriptions if desired. This setting is per-product and irreversible 38.
+7. App Store Server Notifications Endpoint (Recommended): Configure a secure HTTPS endpoint URL on your server to receive V2 notifications 40.
+8. Generate API Keys (for Server API): If using the App Store Server API, generate necessary API keys with appropriate permissions (e.g., In-App Purchase) in ASC 26.
+While initial development and testing can often start using local .storekit configuration files 5, configuring products in ASC is necessary for Sandbox testing and production release 5.
+2. Implementation Guide (SwiftUI & async/await Focus)
+This section details the practical steps for integrating StoreKit 2 into a modern iOS application using SwiftUI and Swift's concurrency features (async/await).
+2.1 Setting up StoreKit 2 in Your Project
+Integrating StoreKit 2 is straightforward:
+1. Import StoreKit: Add import StoreKit at the top of any Swift file where you'll use StoreKit APIs.
+2. Add Capability: Ensure the "In-App Purchase" capability is added to your app target in Xcode (Project Settings -> Signing & Capabilities -> + Capability -> In-App Purchase) 61.
+3. Create a Store Manager: It's best practice to encapsulate StoreKit logic within a dedicated class or actor, often conforming to ObservableObject for easy integration with SwiftUI views. This manager will handle product fetching, purchases, transaction listening, and entitlement checks.
+Swift
+import StoreKit
+import Combine // For ObservableObject
+
+@MainActor
+class StoreManager: ObservableObject {
+   @Published private(set) var products: [Product] =
+   @Published private(set) var purchasedProductIDs = Set<String>()
+   // Add properties for loading states, errors, etc.
+
+   private var transactionListener: Task<Void, Error>? = nil
+   private let productIds = ["com.yourapp.monthly", "com.yourapp.yearly", "com.yourapp.unlockfeature"] // Example IDs
+
+   init() {
+       // Start listening for transactions as soon as the store manager is initialized
+       transactionListener = listenForTransactions()
+
+       // Fetch products on initialization
+       Task {
+           await fetchProducts()
+           await updateCustomerProductStatus() // Check initial entitlements
+       }
+   }
+
+   deinit {
+       // Ensure the listener task is cancelled when the store manager is deinitialized
+       transactionListener?.cancel()
+   }
+
+   // Methods for fetching products, purchasing, handling transactions, etc. will go here...
+}
+
+4. Instantiate the Store Manager: Create an instance of your StoreManager, typically as a @StateObject in your main App struct or a relevant root view, making it available throughout your view hierarchy via @EnvironmentObject if needed.
+Swift
+import SwiftUI
+
+@main
+struct YourApp: App {
+   @StateObject private var storeManager = StoreManager()
+
+   var body: some Scene {
+       WindowGroup {
+           ContentView()
+              .environmentObject(storeManager) // Make available to descendant views
+       }
+   }
+}
+
+5. Set up Transaction Listener: Crucially, start listening for transaction updates as early as possible in your app's lifecycle, ideally within the init of your StoreManager. This ensures you catch unfinished transactions from previous sessions or transactions occurring outside the app 8.
+Swift
+// Inside StoreManager class
+private func listenForTransactions() -> Task<Void, Error> {
+   Task.detached { // Use.detached or ensure the Task lives long enough
+       // Iterate through any transactions that don't come from a direct call to purchase().
+       for await result in Transaction.updates {
+           await self.handleTransactionUpdate(result)
+       }
+   }
+}
+
+private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+   do {
+       let transaction = try self.checkVerified(result)
+
+       // Deliver products to the user after verification
+       await self.updateCustomerProductStatus()
+
+       // Always finish a transaction.
+       await transaction.finish()
+       print("Transaction \(transaction.id) finished.")
+
+   } catch {
+       // StoreKit error, possibly unverified transaction
+       print("Transaction update failed verification: \(error)")
+   }
+}
+
+// Helper function to check verification
+func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+   switch result {
+   case.unverified(_, let error):
+       // Successful purchase but transaction/receipt can't be verified.
+       // Handle this error appropriately for your business.
+       print("Transaction unverified: \(error.localizedDescription)")
+       throw error // Or a custom error
+   case.verified(let safe):
+       // Successful purchase
+       return safe
+   }
+}
+
+Note: There have been reports of Transaction.updates sometimes not delivering unfinished transactions reliably at launch in certain test scenarios 29. While updates is the primary listener, consider also checking Transaction.unfinished explicitly at launch as a fallback if encountering issues, although updates should handle this 29. Using Task.detached or ensuring the listener task's lifetime is managed correctly is important 62.
+2.2 Fetching Products (Product.products(for:))
+To display IAPs, you first need to fetch their details from the App Store (or the .storekit configuration file during testing).
+   1. Define Product IDs: Maintain a list of the unique product identifiers you configured in App Store Connect 7. These can be hardcoded, stored in a plist, or fetched from your server.
+   2. Call Product.products(for:): Use this static async function, passing in your set of product IDs 5.
+Swift
+// Inside StoreManager class
+func fetchProducts() async {
+   do {
+       let storeProducts = try await Product.products(for: productIds)
+       // Update the @Published products array on the main thread
+       DispatchQueue.main.async {
+            self.products = storeProducts
+            print("Fetched \(storeProducts.count) products.")
+            // Further processing: sort, categorize, etc.
+       }
+   } catch {
+       print("Failed to fetch products: \(error)")
+       // Handle error appropriately (e.g., update UI state)
+   }
+}
+
+      * StoreKit ignores duplicate or invalid identifiers in the request 63.
+      * The function returns an array of Product objects containing localized details fetched from the App Store 63.
+      * Handle potential StoreKitError exceptions (e.g., network issues) 63.
+      * Ensure UI updates (like updating the @Published products array) happen on the main thread.
+2.3 Displaying Products in a SwiftUI View
+Once products are fetched, display them to the user.
+      1. Access Products: Your SwiftUI view should access the fetched products array from the StoreManager (e.g., via @EnvironmentObject or by passing the manager/products down).
+      2. Iterate and Display: Use ForEach to iterate over the products and display relevant information using Product properties:
+      * displayName: Localized product name 34.
+      * description: Localized product description 34.
+      * displayPrice: Localized price string (e.g., "$4.99", "£9.99/month") 7.
+      * price: The Decimal value of the price 34.
+      * product.subscription?.subscriptionPeriod: For subscriptions, details about the period 34.
+      * product.subscription?.introductoryOffer: Details about any introductory offer 34.
+Swift
+import SwiftUI
+import StoreKit
+
+struct StoreView: View {
+   @EnvironmentObject var storeManager: StoreManager
+   // Add state for loading/error handling
+
+   var body: some View {
+       List {
+           Section("Subscriptions") {
+               ForEach(storeManager.products.filter { $0.type ==.autoRenewable }) { product in
+                   ProductRow(product: product)
+               }
+           }
+
+           Section("Features") {
+               ForEach(storeManager.products.filter { $0.type ==.nonConsumable }) { product in
+                   ProductRow(product: product)
+               }
+           }
+            // Add sections for consumables, etc.
+       }
+      .navigationTitle("Store")
+       // Consider adding.refreshable { await storeManager.fetchProducts() }
+   }
+}
+
+struct ProductRow: View {
+   @EnvironmentObject var storeManager: StoreManager
+   let product: Product
+   @State private var isPurchasing = false
+
+   var body: some View {
+       HStack {
+           VStack(alignment:.leading) {
+               Text(product.displayName)
+                  .font(.headline)
+               Text(product.description)
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+           }
+           Spacer()
+           if storeManager.purchasedProductIDs.contains(product.id) {
+                Text("Purchased")
+                   .foregroundColor(.green)
+           } else {
+               Button {
+                   isPurchasing = true
+                   Task {
+                       await purchase()
+                       isPurchasing = false
+                   }
+               } label: {
+                   if isPurchasing {
+                       ProgressView()
+                          .frame(width: 60)
+                   } else {
+                       Text(product.displayPrice)
+                   }
+               }
+              .buttonStyle(.borderedProminent)
+              .disabled(isPurchasing)
+           }
+       }
+        // Add logic to show introductory offer details if eligible
+        // if await product.subscription?.isEligibleForIntroOffer?? false {... }
+   }
+
+   func purchase() async {
+       do {
+           try await storeManager.purchase(product)
+       } catch {
+           print("Purchase failed: \(error)")
+           // Show error alert to user
+       }
+   }
+}
+
+      3. Use StoreKit Views (Optional but Recommended): For simpler or standard layouts, leverage SwiftUI's built-in StoreKit views like ProductView, StoreView, and SubscriptionStoreView. These handle fetching, display, localization, and even the purchase action with minimal code 2.
+Swift
+import SwiftUI
+import StoreKit
+
+struct SimpleStoreView: View {
+   let productIDs = ["com.yourapp.monthly", "com.yourapp.yearly"]
+   @EnvironmentObject var storeManager: StoreManager // Still needed for completion handling
+
+   var body: some View {
+       StoreView(ids: productIDs) { product in
+           // Optional: Customize row appearance or add icons
+            ProductRow(product: product) // Use your custom row if needed
+       }
+      .navigationTitle("Upgrade")
+      .onInAppPurchaseCompletion { product, result in
+            // Handle purchase result here (update entitlements, show confirmation/error)
+            await storeManager.handlePurchaseCompletion(product: product, result: result)
+       }
+       // Add other modifiers like.subscriptionStorePolicyForegroundStyle, etc.
+   }
+}
+
+struct SimpleSubscriptionView: View {
+    let groupID = "your_subscription_group_id" // From App Store Connect
+    @EnvironmentObject var storeManager: StoreManager
+
+    var body: some View {
+        SubscriptionStoreView(groupID: groupID) {
+            // Optional: Add marketing content header
+            MarketingContentView()
+        }
+       .background(.thinMaterial) // Example customization
+       .subscriptionStoreButtonLabel(.multiline)
+       .onInAppPurchaseCompletion { product, result in
+            await storeManager.handlePurchaseCompletion(product: product, result: result)
+        }
+       .subscriptionStatusTask(for: groupID) { taskState in
+            // Update UI based on subscription status changes
+            await storeManager.handleSubscriptionStatusUpdate(taskState: taskState)
+        }
+       .manageSubscriptionsSheet(isPresented: $isManagingSubscriptions) // Optional: Add manage sheet
+    }
+
+    @State private var isManagingSubscriptions = false // For manage sheet
+}
+
+struct MarketingContentView: View {
+   var body: some View {
+       VStack {
+           Text("Unlock Premium Features!").font(.largeTitle).padding()
+           // Add more marketing text/images
+       }
+   }
+}
+
+         * These views automatically handle localization and display standard UI elements 3.
+         * Use modifiers like .onInAppPurchaseCompletion, .subscriptionStatusTask, .currentEntitlementTask, etc., to react to purchase events and entitlement changes 18.
+2.4 Initiating Purchases (product.purchase())
+Triggering a purchase is an async call on a Product instance.
+         1. Get Product: Obtain the Product instance the user wants to purchase (usually from your fetched products array).
+         2. Call purchase(): Invoke await product.purchase(). This presents the system confirmation sheet 5.
+Swift
+// Inside StoreManager class
+func purchase(_ product: Product) async throws {
+   print("Attempting purchase for \(product.id)...")
+   // Optional: Add purchase options like appAccountToken
+   let result = try await product.purchase() // Use purchase(options:) if needed
+
+   // Handle the result immediately (though the listener also handles it)
+   await handlePurchaseResult(result)
+}
+
+// Can be called from purchase() and also from onInAppPurchaseCompletion modifier
+func handlePurchaseCompletion(product: Product, result: Result<Product.PurchaseResult, Error>) async {
+    print("Purchase completed for \(product.id)")
+    switch result {
+    case.success(let purchaseResult):
+        await handlePurchaseResult(purchaseResult)
+    case.failure(let error):
+        print("Purchase failed: \(error)")
+        // Show error to user
+    }
+}
+
+private func handlePurchaseResult(_ result: Product.PurchaseResult) async {
+   switch result {
+   case.success(let verificationResult):
+       print("Purchase successful, handling verification...")
+       await handleTransactionUpdate(verificationResult) // Reuse listener logic
+
+   case.userCancelled:
+       print("Purchase cancelled by user.")
+       // Update UI state if needed
+
+   case.pending:
+       print("Purchase is pending approval (e.g., Ask to Buy).")
+       // Update UI to reflect pending state, listener will handle final transaction
+       // No transaction to finish here
+
+   @unknown default:
+       print("Unknown purchase result.")
+       // Handle future cases
+   }
+}
+
+         3. Purchase Options: The purchase() method accepts an optional Set<Product.PurchaseOption> 21. Useful options include:
+            * .appAccountToken(UUID): Associates an opaque UUID with the transaction, linking it to your app's user account system. This token appears in the Transaction object and server notifications 1.
+            * .simulatesAskToBuyInSandbox(true): Forces the Ask to Buy flow during Sandbox testing 21.
+            * .promotionalOffer(...): Used when applying a signed promotional offer (requires server-side signature generation) 21.
+            * .quantity(Int): For purchasing multiple units of a consumable 21.
+2.5 Observing Transactions: Transaction.updates (TransactionListener)
+As shown in section 2.1, listening for Transaction.updates is critical for handling transactions that don't originate directly from a product.purchase() call within the current app session 5.
+Key Scenarios Handled by the Listener:
+            * Unfinished Transactions: Transactions from previous sessions that weren't finish()ed 29. These should be delivered immediately upon listener startup.
+            * External Purchases/Redemptions: Purchases made via promo links, offer code redemptions using presentOfferCodeRedeemSheet, etc 30.
+            * Ask to Buy: Approval or denial of pending purchases 30.
+            * Subscription Renewals: Automatic renewals processed by the App Store.
+            * Cross-Device Purchases: Purchases made by the same user on another device 30.
+            * Refunds/Revocations: Transactions being refunded or revoked (e.g., Family Sharing changes) will appear with revocationDate set 35.
+Implementation Best Practices:
+            * Start Early: Initialize the listener (Task iterating Transaction.updates) as early as possible, typically in your StoreManager's init 8.
+            * Long-Lived Task: Ensure the Task running the listener loop persists for the app's lifetime. Using Task.detached or managing the task lifecycle carefully is important 62.
+            * Verify: Always check the VerificationResult (.verified or .unverified) before processing the transaction 23.
+            * Idempotency: Your handling logic should be idempotent – processing the same transaction multiple times should not cause issues (though StoreKit aims to deliver unfinished transactions only once via updates 30). Check if you've already processed a transaction ID if necessary.
+            * Finish: Crucially, call await transaction.finish() after successfully verifying and granting entitlement for any transaction received through the listener 8.
+2.6 Handling Purchase Outcomes
+Your handlePurchaseResult (from product.purchase()) and handleTransactionUpdate (from Transaction.updates) functions need to manage the different possibilities:
+            * Success (.success(.verified(transaction))):
+            1. Verify the transaction (ideally server-side, see Section 4).
+            2. Unlock the content/feature for the user (see Section 2.7).
+            3. Persist entitlement state locally and/or on your server.
+            4. Call await transaction.finish() 8.
+            5. Update the UI to reflect the purchase.
+            * Success (.success(.unverified(transaction, error))):
+            1. The purchase occurred, but client-side validation failed 23.
+            2. Do not unlock content based solely on this.
+            3. Attempt server-side validation if possible. Treat as failed if server validation also fails or is unavailable.
+            4. Log the error for investigation.
+            5. Update UI to indicate an issue.
+            6. Consider not calling finish() until resolved, or finish and rely on server state. The best approach depends on your risk tolerance and server dependency. Apple's sample code often finishes the transaction even if unverified after logging 71.
+            * User Cancelled (.userCancelled):
+            1. No action required beyond dismissing loading states or purchase-related UI 21.
+            2. No transaction to finish.
+            * Pending (.pending):
+            1. Inform the user the purchase is pending (e.g., needs Ask to Buy approval) 21.
+            2. Update UI to a pending state.
+            3. Do not unlock content.
+            4. Rely on the Transaction.updates listener to receive the final approved or declined transaction later.
+            5. No transaction to finish at this stage.
+            * Failure (Error thrown by product.purchase()):
+            1. Catch the StoreKitError (or other errors) 65.
+            2. Inspect the error type (.userCancelled, .networkError, .unknown, etc.) 65.
+            3. Display an appropriate error message to the user.
+            4. Log the error.
+2.7 Verifying Transactions (Client-Side vs. Server-Side Emphasis)
+Transaction verification confirms the purchase originated from the App Store and hasn't been tampered with.
+            * Client-Side Verification (Built-in): StoreKit 2 automatically attempts to validate the JWS signature of Transaction and RenewalInfo objects, returning them wrapped in VerificationResult 1. Accessing the value via .verified(let transaction) means client-side checks passed. This uses Apple's public key embedded within the app 13. You can save the public certificate from the .storekit file editor for local testing validation 15.
+            * Necessity of Server-Side Validation: While convenient, relying solely on client-side verification for granting entitlements is strongly discouraged 8. A jailbroken device could potentially bypass client-side checks. Server-side validation provides a secure, authoritative source of truth 8.
+            * When Client-Side Might Suffice: For very low-risk, non-critical consumables where the potential impact of fraud is minimal, some might accept the risk of client-only validation 8. However, for subscriptions, non-consumables, or valuable consumables, server validation is essential.
+            * Server-Side Approach: The secure method involves sending the transaction.jwsRepresentation to your server. Your server then validates the JWS signature using Apple's public root certificate and potentially calls the App Store Server API for further confirmation (details in Section 4) 9.
+2.8 Unlocking Content/Features: Entitlement Management
+Entitlement management is the process of determining what content or features a user should have access to based on their verified purchases.
+            * Source of Truth: Your server, validated against the App Store Server API or verified JWS data, should be the ultimate source of truth for entitlements 8.
+            * Transaction.currentEntitlements: StoreKit 2 provides this convenient AsyncSequence to fetch the latest valid transaction for each non-consumable and active subscription (in .subscribed or .inGracePeriod state) the user is entitled to 1. It automatically excludes revoked or refunded transactions and finished consumables 70.
+Swift
+// Inside StoreManager class
+@Published var isProUser: Bool = false // Example entitlement state
+
+func updateCustomerProductStatus() async {
+   var purchasedIDs = Set<String>()
+   var proAccess = false
+
+   // Iterate through current entitlements to determine access
+   for await result in Transaction.currentEntitlements {
+       do {
+           let transaction = try checkVerified(result) // Verify transaction
+
+           // Process based on product type
+           switch transaction.productType {
+           case.nonConsumable:
+               purchasedIDs.insert(transaction.productID)
+               if transaction.productID == "com.yourapp.unlockfeature" {
+                    // Grant access to specific feature
+               }
+
+           case.autoRenewable:
+               // Check if the subscription is active
+               if transaction.revocationDate == nil &&!transaction.isUpgraded {
+                    purchasedIDs.insert(transaction.productID)
+                    // Check specific product IDs or subscription group levels
+                    if ["com.yourapp.monthly_pro", "com.yourapp.yearly_pro"].contains(transaction.productID) {
+                        proAccess = true
+                    }
+               }
+
+           case.nonRenewable:
+                // Handle non-renewing subscriptions (check expiration manually if needed)
+                if transaction.revocationDate == nil {
+                    purchasedIDs.insert(transaction.productID)
+                    // Example: Check if within validity period
+                    // let expiration = Calendar.current.date(byAdding:.day, value: 365, to: transaction.purchaseDate)!
+                    // if Date() < expiration { purchasedIDs.insert(transaction.productID) }
+                }
+           case.consumable:
+                // Consumables don't usually appear here unless unfinished
+                break
+           @unknown default:
+                break
+           }
+       } catch {
+           print("Entitlement verification failed: \(error)")
+           // Handle error - potentially revoke access if verification fails consistently
+       }
+   }
+
+   // Update the local state based on verified entitlements
+   DispatchQueue.main.async {
+        self.purchasedProductIDs = purchasedIDs
+        self.isProUser = proAccess
+        print("Updated entitlements: \(purchasedIDs), Pro: \(proAccess)")
+   }
+}
+
+            * Checking at Launch: Call a function like updateCustomerProductStatus() (which iterates Transaction.currentEntitlements) when your app launches (e.g., in the StoreManager's init or via a .task modifier) to establish the initial entitlement state 71.
+            * Responding to Changes: Call updateCustomerProductStatus() again whenever a new transaction is successfully processed by your listener (handleTransactionUpdate) or after a successful purchase (handlePurchaseResult) to refresh the state. SwiftUI views bound to @Published properties like isProUser will update automatically.
+            * Server Synchronization: For multi-device consistency and resilience, sync the entitlement status derived from currentEntitlements (or ideally, directly from server-side validation) with your own backend. Your app can then fetch the authoritative entitlement state from your server, potentially falling back to currentEntitlements if the server is unreachable.
+            * Finishing Transactions: Remember to call await transaction.finish() only after successfully verifying the transaction and granting the entitlement 8. currentEntitlements only returns transactions relevant to current access; use Transaction.all if you need the full history 23.
+3. Managing Subscriptions
+Auto-renewable subscriptions require specific handling for their lifecycle events. StoreKit 2 provides dedicated APIs to manage this.
+3.1 Fetching Subscription Status and Information (SubscriptionInfo)
+To understand a user's current subscription situation for a specific group:
+               1. Get Group ID: Know the subscriptionGroupID configured in App Store Connect for the subscriptions you're interested in 73. You can get this from a Product.subscription.subscriptionGroupID or Transaction.subscriptionGroupID.
+               2. Call SubscriptionInfo.status(for:): Use this static async function to get an array of SubscriptionInfo.Status objects for the given group ID 14. The array might be empty if the user has never subscribed to that group 73. It can contain multiple entries if the user has access through different means (e.g., direct purchase and Family Sharing) 74.
+Swift
+// Inside StoreManager class
+@Published var subscriptionGroupStatus: Product.SubscriptionInfo.RenewalState?
+
+func checkSubscriptionStatus(groupID: String) async {
+   do {
+       let statuses = try await Product.SubscriptionInfo.status(for: groupID)
+
+       if let currentStatus = statuses.first { // Simplified: Assumes one relevant status or prioritizes first
+           let state = currentStatus.state
+            // Access renewal info and transaction for more details
+            if case.verified(let renewalInfo) = currentStatus.renewalInfo {
+                 print("Subscription Renewal State: \(state), AutoRenew: \(renewalInfo.willAutoRenew)")
+                 // Update UI based on state (subscribed, expired, etc.)
+                 DispatchQueue.main.async {
+                      self.subscriptionGroupStatus = state
+                 }
+            } else {
+                 print("Subscription renewal info unverified.")
+                  DispatchQueue.main.async {
+                      self.subscriptionGroupStatus = nil // Treat as unknown/unverified
+                 }
+            }
+
+            // You might need more complex logic to determine the highest entitlement
+            // if multiple statuses exist (e.g., due to Family Sharing)
+            // let highestEntitlement = determineHighestEntitlement(from: statuses)
+            // updateEntitlement(basedOn: highestEntitlement)
+
+       } else {
+            print("No subscription status found for group \(groupID). User likely never subscribed.")
+            DispatchQueue.main.async {
+                 self.subscriptionGroupStatus = nil // Or treat as.expired
+            }
+       }
+   } catch {
+       print("Error fetching subscription status: \(error)")
+        DispatchQueue.main.async {
+             self.subscriptionGroupStatus = nil // Treat as unknown/error
+        }
+   }
+}
+
+               3. Interpret Status: Each SubscriptionInfo.Status object contains:
+                  * state: The crucial Product.SubscriptionInfo.RenewalState enum (.subscribed, .expired, .inBillingRetryPeriod, .inGracePeriod, .revoked) 43. Use this to determine service access. Users are generally entitled to service only in .subscribed and .inGracePeriod states 47.
+                  * renewalInfo: A VerificationResult<RenewalInfo> containing details about the next renewal period (auto-renew status, next renewal date, price, etc.) 43.
+                  * transaction: A VerificationResult<Transaction> representing the latest transaction associated with this status entry 43.
+                  4. SwiftUI Integration: Use the .subscriptionStatusTask(for:action:) modifier to automatically fetch and observe status changes for a group ID within a SwiftUI view 67.
+3.2 Understanding Subscription Groups, Levels, and Changes
+As mentioned in 1.4, Subscription Groups are fundamental:
+                  * Purpose: Group related subscription options (e.g., Basic Monthly, Pro Monthly, Pro Annual) 48. Users can typically only have one active subscription per group 50.
+                  * Levels: Assign integer levels (ranks) to products within a group in ASC (1 = highest service/features) 14.
+                  * Changes: The level ranking dictates the behavior when a user switches between subscriptions within the same group 49:
+                  * Upgrade (e.g., Level 3 -> Level 1): Takes effect immediately. The user is charged the new price, and receives a pro-rata refund for the unused portion of the previous subscription 49. The old transaction may be marked with isUpgraded = true.
+                  * Downgrade (e.g., Level 1 -> Level 3): Takes effect at the next renewal date. The user keeps the higher level access until the current period ends, then renews at the lower level and price 44.
+                  * Crossgrade (e.g., Level 2 Monthly -> Level 2 Annual): Behavior depends on duration. Same duration: takes effect immediately. Different duration: takes effect at the next renewal date 49.
+                  * Identifying the Next Plan: The RenewalInfo.autoRenewPreference property indicates the productID the subscription is scheduled to renew as after an upgrade, downgrade, or crossgrade has been initiated but before it takes effect 39.
+3.3 Handling Renewals, Cancellations, Billing Issues, and Grace Periods
+The subscription lifecycle involves several states beyond simple active/expired:
+                  * Renewals: Handled automatically by the App Store. Successful renewals generate a new Transaction. Your Transaction.updates listener or server notifications will receive these 77. Ensure finish() is called on renewal transactions after verification.
+                  * Cancellations (Turning off Auto-Renew): Users manage auto-renewal via system settings (or potentially an in-app .manageSubscriptionsSheet). When auto-renew is turned off, the RenewalInfo.willAutoRenew property becomes false. The subscription remains active until the RenewalInfo.renewalDate (expiration date) is reached 39. The RenewalState becomes .expired after this date. Server notifications (DID_CHANGE_RENEWAL_STATUS) also signal this change 77.
+                  * Billing Issues: If renewal fails (e.g., expired credit card), the subscription enters the .inBillingRetryPeriod state 45. The App Store attempts to collect payment for up to 60 days 77. During this period, the user is not entitled to service unless a grace period is active 45. Check RenewalInfo.isInBillingRetry 39.
+                  * Billing Grace Period: An optional feature enabled in ASC 6. If enabled, when a billing issue occurs, the subscription enters the .inGracePeriod state instead of immediately losing access 47. The user retains full access during the grace period (configurable length: 3, 16, or 28 days) while Apple attempts billing retry 78. Check RenewalState ==.inGracePeriod and RenewalInfo.gracePeriodExpirationDate 39. Service should be provided during this time 46. If billing recovers, a renewal transaction occurs. If the grace period expires without recovery, the state transitions to .inBillingRetryPeriod (without service) or eventually .expired.
+                  * Revocation: Access can be revoked (RenewalState.revoked) due to refunds or Family Sharing changes 47. Check Transaction.revocationDate and Transaction.revocationReason 36.
+Handling Strategy:
+                  1. Rely on RenewalState: Base entitlement primarily on the state property from SubscriptionInfo.Status. Grant access for .subscribed and .inGracePeriod 47.
+                  2. Listen for Updates: Use Transaction.updates (client-side) and App Store Server Notifications (server-side) to react promptly to state changes (renewals, expirations, billing issues, grace periods, revocations).
+                  3. Server Validation: Use server-side validation and the App Store Server API (Get All Subscription Statuses) as the authoritative source for subscription status 26.
+                  4. Testing: Use Xcode's .storekit editor options (Enable Billing Retry, Enable Grace Period, Subscription Renewal Rate) and Sandbox settings to simulate these scenarios thoroughly 45.
+3.4 Implementing Promotional Offers and Offer Codes
+Offers provide discounts to acquire or retain subscribers.
+                  * Introductory Offers: For new subscribers within a subscription group. Configured in ASC (Free Trial, Pay As You Go, Pay Up Front) 50.
+                  * Eligibility Check: Use await product.subscription?.isEligibleForIntroOffer to check if the user qualifies 14. This checks eligibility across the entire group.
+                  * Display: If eligible, display the offer details obtained from product.subscription?.introductoryOffer 14.
+                  * Purchase: No special PurchaseOption is needed; StoreKit applies the offer automatically if the user is eligible when product.purchase() is called.
+                  * Promotional Offers: For existing or lapsed subscribers. Configured in ASC, eligibility determined by your app/server logic 56.
+                  * Eligibility: You define criteria (e.g., lapsed subscribers, users meeting certain criteria). Check user history/status against your rules 56.
+                  * Signature Generation (Server-Side): Displaying and redeeming a promotional offer requires a cryptographic signature generated by your server. This involves:
+                  1. Your app requests a signature from your server, providing user identifier (e.g., hashed appAccountToken), product ID, and the offer ID (from ASC).
+                  2. Your server uses your private In-App Purchase Key (downloaded from ASC) to generate a signature with a nonce and timestamp 56.
+                  3. Your server returns the offer ID, key identifier, nonce, signature, and timestamp to the app.
+                  * Purchase: Call product.purchase(options: [.promotionalOffer(...)]), passing the signature details received from your server 21.
+                  * SwiftUI: The .subscriptionPromotionalOffer modifier (iOS 18+) simplifies presenting these, handling the signature request and application 85.
+                  * Offer Codes: One-time use codes generated in ASC for specific promotional offers, distributable online or offline 86.
+                  * Redemption UI: Users redeem codes via a system-provided sheet. Do not build a custom redemption UI 32.
+                  * Presenting the Sheet:
+                  * SwiftUI: Use the .offerCodeRedemption(isPresented:onCompletion:) view modifier 68.
+                  * UIKit: Call await AppStore.presentOfferCodeRedeemSheet(in:) 32. (Older StoreKit 1 used SKPaymentQueue.default().presentCodeRedemptionSheet() 86).
+                  * Handling Redemption: A successful redemption generates a Transaction delivered via Transaction.updates. Handle it like any other purchase 32.
+3.5 Managing Family Sharing (isFamilyShareable)
+Family Sharing allows purchasers to share eligible non-consumables and auto-renewable subscriptions with up to five family members 58.
+                  * Enabling: Turned on per-product in ASC. It's irreversible 38.
+                  * Checking Availability: Use product.isFamilyShareable (StoreKit 2) or skProduct.isFamilyShareable (StoreKit 1) to check if a product supports sharing 58.
+                  * Merchandising: Clearly indicate shareable products in your UI (e.g., using "Family" or "Shareable" in the name/description) 22.
+                  * Granting Access:
+                  * Purchaser: Receives a transaction as normal.
+                  * Family Members: When sharing is enabled/activated, each eligible family member's device receives a separate transaction via Transaction.updates (or paymentQueue(_:updatedTransactions:) in SK1) 38. This may take up to an hour after the initial purchase to propagate 38. For non-consumables purchased before sharing was enabled, family members might need to use a "Restore Purchases" function 59.
+                  * Identifying Ownership: The Transaction.ownershipType property (or in_app_ownership_type in server API/JWS payload) indicates if the transaction is .purchased (by the current user) or .familyShared (received via sharing) 37. Use this to tailor in-app messaging (e.g., "Your family subscription includes...") 22.
+                  * Revocation: If the purchaser leaves the family, stops sharing, or gets a refund, access is revoked for family members 58.
+                  * Client: The Transaction for the family member will appear via updates with a revocationDate set 58. The RenewalState may become .revoked. StoreKit 1 apps implement paymentQueue(_:didRevokeEntitlementsForProductIdentifiers:) 58.
+                  * Server: App Store Server Notifications send a REVOKE notification 58.
+                  * Testing: Use Sandbox Test Families created in App Store Connect to test sharing scenarios 52.
+4. Server-Side Validation (Critical Requirement)
+While StoreKit 2 offers on-device transaction verification, relying solely on it is insecure. Implementing server-side validation is crucial for protecting revenue and ensuring the integrity of entitlements.
+4.1 Why Server-Side Validation is Essential
+                  * Security: Client-side checks can be bypassed on compromised (e.g., jailbroken) devices. A malicious actor could potentially forge validation results or manipulate the app's code 25. Server-side validation provides a secure environment you control.
+                  * Reliability & Source of Truth: Your server becomes the definitive source for user entitlements, independent of the client device's state 8. This is vital for multi-device access and recovering state.
+                  * Preventing Fraud: Server validation is the most reliable way to detect fraudulent or tampered transactions before granting access to paid content or features 8.
+                  * Richer Data & Control: The App Store Server API provides more comprehensive data (like full transaction history, detailed subscription status, refund info) and control (like extending subscription dates) than client-side APIs alone 26.
+Apple explicitly recommends server-side validation as a best practice, even with StoreKit 2's improvements 8.
+4.2 Conceptual Overview of Server Validation Flow
+The typical flow involves communication between the app, your server, and Apple's servers:
+
+
+
+
+
+
+
++-----------+      +-------------------+      +------------------------+
+| User App | | Your Secure Server| | App Store Server API |
++-----------+      +-------------------+      +------------------------+
+| | |
+| 1. Purchase | |
+| (product.purchase()) | |
+| | |
+| <-- Transaction --> | | // (via.success result or updates)
+| | |
+| 2. Send JWS/TxID -->| |
+| | 3. Validate JWS Signature |
+| | (Using Apple Root Cert)|
+| | (Optional but Recommended)|
+| |-------------------------->| 4. Call Server API
+| | | (e.g., Get Transaction Info)
+| |<--------------------------| 5. API Response (Signed Tx Data)
+| | |
+| | 6. Verify API Response |
+| | (Validate JWS) |
+| | |
+| | 7. Update Entitlement |
+| | (Your Database) |
+| | |
+|<-- 8. Grant Access --| |
+| (or Deny) | |
+| | |
+
+
+Flow Steps:
+                  1. Purchase: The user completes a purchase in the app.
+                  2. Send Data to Server: The app securely sends the relevant transaction data to your server. This is typically the transaction.jwsRepresentation (the full signed payload) or sometimes just the transaction.id (if your server will fetch details from the API) 24. Include the appAccountToken if used. Use secure HTTPS requests 88.
+                  3. Validate JWS Signature (Optional but Recommended): Your server can first validate the signature of the received jwsRepresentation locally using Apple's public root certificate chain 13. This provides an initial check for authenticity. The certificate chain is often included in the JWS header (x5c) 13.
+                  4. Call App Store Server API: Your server makes authenticated calls to the App Store Server API endpoints 26. Common calls include:
+                  * Get Transaction Info: Fetches details for a specific transactionId 26.
+                  * Get Transaction History: Retrieves the full purchase history for a user (identified by any one of their transactionIds) 26.
+                  * Get All Subscription Statuses: Gets the current status for all subscription groups for a user 26.
+                  5. Receive API Response: The App Store Server API returns transaction and/or subscription data, also signed in JWS format 26.
+                  6. Verify API Response: Your server must validate the JWS signature of the data received from the API response to ensure it came from Apple and wasn't tampered with in transit 26.
+                  7. Update Entitlement: Based on the verified data (e.g., valid purchase date, non-expired subscription, no revocation), update the user's entitlement status in your database 40.
+                  8. Respond to App: Your server responds to the app, indicating whether access should be granted or denied. The app then updates the UI and unlocks/locks content accordingly.
+4.3 Key Data Points Involved
+                  * Transaction.jwsRepresentation (Client -> Server): The primary piece of data sent from the app to your server. It's a compact, signed string containing the transaction payload 9.
+                  * Transaction.id (Client -> Server / Server -> API): The unique identifier for the transaction event. Can be sent to your server instead of the full JWS if your server will fetch details from the API. Used as a path parameter in many App Store Server API calls 26.
+                  * Transaction.originalTransactionId (Server -> API): Used to query the history or status of a subscription series 25.
+                  * appAccountToken (Client -> Server -> Your DB): The UUID linking the purchase to your user account system, if provided during the purchase 39. Useful for associating server notifications with users 25.
+                  * JWS Header (alg, x5c): Contains metadata about the signature algorithm and the certificate chain needed for validation 13.
+                  * JWS Payload (Decoded): Contains the actual transaction details (JWSTransactionDecodedPayload or JWSRenewalInfoDecodedPayload) like productId, purchaseDate, expiresDate, offerType, price, currency, etc 10. Note that prices in JWS payloads are often in milliunits 10.
+                  * Apple Root Certificate: Your server needs access to Apple's public root certificate (downloadable from Apple PKI) to validate the JWS signature chain 40.
+                  * App Store Connect API Key (JWT): Your server needs a private key, key ID, and issuer ID from ASC to generate JSON Web Tokens (JWTs) for authorizing calls to the App Store Server API 26.
+4.4 Links to Apple Resources
+                  * App Store Server API Documentation: https://developer.apple.com/documentation/appstoreserverapi 4
+                  * App Store Server Notifications V2: https://developer.apple.com/documentation/appstoreservernotifications 1
+                  * Generating API Keys: https://developer.apple.com/documentation/appstoreconnectapi/creating_api_keys_for_app_store_connect_api 26
+                  * Generating JWTs: https://developer.apple.com/documentation/appstoreconnectapi/generating_tokens_for_api_requests 26
+                  * App Store Server Library (Open Source): Simplifies JWT creation, API calls, and JWS validation. https://developer.apple.com/documentation/appstoreserverapi/simplifying_your_implementation_by_using_the_app_store_server_library 26
+                  * WWDC Sessions (Search by Title/Year):
+                  * WWDC21: Meet StoreKit 2 (10114) 1
+                  * WWDC21: Manage in-app purchases on your server (10174) 1
+                  * WWDC21: Support customers and handle refunds (10175) 1
+                  * WWDC22: What's new with in-app purchase (10041) 1
+                  * WWDC22: Explore in-app purchase integration and migration (10040) 90
+                  * WWDC23: What's new in App Store server APIs (10142) 93
+                  * WWDC23: Meet the App Store Server Library (10144) 92
+                  * WWDC24: Implement App Store Offers (10110) 85
+Note: This guide explains the conceptual flow and client-side requirements for server validation. Implementing the actual server-side code requires backend development expertise and is beyond the scope of this document.
+5. Testing & Debugging
+Thorough testing is essential for a reliable IAP implementation. StoreKit 2 offers significantly improved testing tools compared to StoreKit 1.
+5.1 StoreKit Testing in Xcode (.storekit Files)
+Xcode's local testing environment allows testing IAPs without needing App Store Connect setup initially or a network connection 15.
+                  * Creating a Configuration File:
+                  1. In Xcode: File > New > File...
+                  2. Filter for "StoreKit Configuration File" and select it 15.
+                  3. Name the file (e.g., Products.storekit).
+                  4. Optionally, check "Sync this file with an app in App Store Connect" (Xcode 14+) to pull existing ASC products 15. Otherwise, leave unchecked for a local-only file 15.
+                  5. Save the file in your project directory 15.
+                  * Adding Products:
+                  1. Select the .storekit file in the Project Navigator to open the editor 15.
+                  2. Click the "+" button at the bottom to add products 15.
+                  3. Choose the product type (Consumable, Non-Consumable, Auto-Renewable Subscription, Non-Renewing Subscription) 97.
+                  4. Configure details: Reference Name, Product ID (must match what your code expects), Price, Localization (Display Name, Description) 15.
+                  5. For Subscriptions: Create/assign to a Subscription Group, set duration, define Introductory/Promotional/Offer Codes 15.
+                  6. For Non-Consumables/Subscriptions: Optionally enable Family Sharing 15.
+                  * Note: Synced files cannot be edited directly unless converted to local (Editor > Convert to Local StoreKit Configuration) 15.
+                  * Enabling for a Scheme:
+                  1. Click the scheme selector in Xcode and choose "Edit Scheme..." 33.
+                  2. Select the "Run" action, then the "Options" tab 33.
+                  3. In the "StoreKit Configuration" dropdown, select your .storekit file 33.
+                  4. Close the scheme editor.
+                  * Now, when you build and run this scheme, StoreKit calls will use the data from your selected file instead of hitting App Store servers 33. To disable, set the configuration back to "None" 15.
+5.2 Simulating Scenarios
+The .storekit editor and Xcode menus provide powerful simulation capabilities:
+                  * Transaction Manager: Access via Debug > StoreKit > Manage Transactions... 61. This window shows all transactions generated during local testing. You can:
+                  * View transaction details (ID, product, date, state, offer info) 16.
+                  * Delete Transactions: Useful for re-testing non-consumable or subscription purchases 81.
+                  * Refund Transactions: Simulate refunds (immediately processed in testing) 16.
+                  * Approve/Decline Ask to Buy: Resolve pending Ask to Buy requests 99.
+                  * Resolve Interrupted Purchases: Simulate the user resolving a payment issue 81.
+                  * Request Price Increase Consent: Test subscription price increase flows 100.
+                  * Manage Subscriptions: Change subscription plans, cancel subscriptions 101.
+                  * Create Purchases: Manually trigger purchases or purchase intents directly from the manager (Xcode 15+) 19.
+                  * Editor Menu Options (with .storekit file selected):
+                  * Subscription Renewal Rate: Accelerate time for testing renewals (e.g., 5 seconds, 30 seconds) 81.
+                  * Default Storefront / Localization: Test different regions and languages 97.
+                  * Enable Ask to Buy: Force all purchases into the Ask to Buy flow 99.
+                  * Enable Interrupted Purchases: Simulate purchases failing initially due to issues like expired cards or needing T&C agreement 81.
+                  * Enable Billing Retry on Renewal: Force subscription renewals into the billing retry state 79.
+                  * Enable Billing Grace Period: Simulate the grace period feature being active 79.
+                  * Simulated StoreKit Failures (Xcode 15+): Force specific StoreKit API calls (e.g., Product.products(for:), product.purchase()) to return specific errors for testing error handling 19.
+                  * Save Public Certificate: Export the public key certificate used for local JWS validation 15.
+                  * Subscription Offers Key: Export the private key needed for signing local promotional/offer code tests 84.
+5.3 Using XCTest with StoreKitTest
+For automated testing, the StoreKitTest framework allows programmatic control over the local test environment within your XCTest cases 17.
+                  * Setup:
+                  1. Import StoreKitTest in your test file.
+                  2. Ensure your .storekit configuration file is included in your test target's bundle resources 96.
+                  3. Create an SKTestSession instance, initializing it with the name of your configuration file 17.
+Swift
+import XCTest
+import StoreKitTest
+@testable import YourApp // Import your app module
+
+class StoreKitTests: XCTestCase {
+   var session: SKTestSession!
+   var storeManager: StoreManager! // Your app's store manager
+
+   override func setUpWithError() throws {
+       try super.setUpWithError()
+       // Initialize the test session with your configuration file
+       session = try SKTestSession(configurationFileNamed: "Products.storekit") // Use your filename
+       session.disableDialogs = true // Optional: Speed up tests by suppressing UI sheets
+
+       // Clear transaction history for a clean slate (optional)
+       session.clearTransactions()
+
+       // Initialize your app's StoreManager or relevant components
+        storeManager = StoreManager() // Ensure StoreManager uses the test session implicitly
+   }
+
+   override func tearDownWithError() throws {
+       session = nil
+       storeManager = nil
+       try super.tearDownWithError()
+   }
+
+   // Test functions go here...
+}
+
+                  * Controlling the Session: The SKTestSession object provides methods to:
+                  * clearTransactions(): Remove all existing transactions.
+                  * disableDialogs = true/false: Suppress system purchase/confirmation sheets 100.
+                  * askToBuyEnabled = true/false: Simulate Ask to Buy 17.
+                  * interruptedPurchasesEnabled = true/false: Simulate interruptions 17.
+                  * timeRate: Control subscription renewal speed 17.
+                  * failTransactionsEnabled(error:): Make purchases fail with a specific error 17.
+                  * buyProduct(productIdentifier:): Simulate a purchase directly 17.
+                  * refundTransaction(identifier:): Simulate a refund 17.
+                  * resolveTransaction(identifier:): Resolve an interrupted or Ask to Buy transaction 17.
+                  * Example Test Case:
+Swift
+// Inside StoreKitTests class
+func testSuccessfulPurchase() async throws {
+   // Ensure the product exists in the config file
+   let productID = "com.yourapp.unlockfeature"
+
+   // Pre-condition: User should not have the entitlement yet
+   await storeManager.updateCustomerProductStatus()
+   XCTAssertFalse(storeManager.purchasedProductIDs.contains(productID), "Entitlement should not exist initially")
+
+   // Fetch the product (uses the test session via StoreManager)
+   let products = try await Product.products(for: [productID])
+   guard let productToBuy = products.first else {
+       XCTFail("Product \(productID) not found in test configuration")
+       return
+   }
+
+   // Simulate purchase (StoreManager calls product.purchase)
+   // Since dialogs are disabled, this should complete quickly
+   try await storeManager.purchase(productToBuy)
+
+   // Post-condition: User should now have the entitlement
+   // Need to wait briefly for async listener/updates to process
+   try await Task.sleep(nanoseconds: 1_000_000_000) // Adjust delay as needed
+   await storeManager.updateCustomerProductStatus()
+   XCTAssertTrue(storeManager.purchasedProductIDs.contains(productID), "Entitlement should exist after purchase")
+
+   // Optional: Check transaction details via session.allTransactions
+   let transactions = try session.allTransactions()
+   XCTAssertEqual(transactions.count, 1)
+   XCTAssertEqual(transactions.first?.productIdentifier, productID)
+}
+
+func testSubscriptionRenewal() async throws {
+    session.timeRate =.monthlyRenewalEveryThreeSeconds // Accelerate time
+    let productID = "com.yourapp.monthly"
+    let products = try await Product.products(for: [productID])
+    guard let productToBuy = products.first else { XCTFail("Subscription product not found"); return }
+
+    try await storeManager.purchase(productToBuy)
+    try await Task.sleep(nanoseconds: 1_000_000_000) // Wait for initial purchase processing
+
+    await storeManager.updateCustomerProductStatus()
+    XCTAssertTrue(storeManager.purchasedProductIDs.contains(productID), "Subscription should be active")
+
+    // Wait for renewal (e.g., 4 seconds > 3 second renewal rate)
+    try await Task.sleep(nanoseconds: 4_000_000_000)
+
+    // Check if renewal transaction occurred (check via listener or session)
+    let transactions = try session.allTransactions()
+    XCTAssertGreaterThan(transactions.count, 1, "Renewal transaction should exist")
+
+    // Check status again
+    await storeManager.updateCustomerProductStatus()
+    XCTAssertTrue(storeManager.purchasedProductIDs.contains(productID), "Subscription should still be active after renewal")
+}
+
+5.4 Debugging Common Issues and Interpreting Errors
+                     * Products Not Loading:
+                     * Verify Product IDs in code exactly match those in App Store Connect or the active .storekit file 61.
+                     * Ensure the correct .storekit file is selected in the active scheme 61.
+                     * Check network connection if testing against Sandbox/Production.
+                     * Allow time for ASC changes to propagate to Sandbox (up to an hour) 52.
+                     * Check for StoreKitErrors during the Product.products(for:) call 65.
+                     * Purchases Failing:
+                     * Check the returned Product.PurchaseResult or caught Error 21.
+                     * .userCancelled: Expected if the user cancels.
+                     * .pending: Expected for Ask to Buy.
+                     * Errors: Network errors (NSURLErrorDomain) 103, StoreKit errors (StoreKitError, e.g., .notAvailableInStorefront, .unknown) 65.
+                     * Sandbox: Ensure the Sandbox user account is valid and logged in correctly in device Settings. Check if "Allow Purchases & Renewals" is enabled for the Sandbox account 45.
+                     * Xcode Testing: Check if simulated failures are enabled in the Editor menu or Transaction Manager 19.
+                     * Transactions Not Finishing / Repeatedly Delivered:
+                     * Ensure await transaction.finish() is called reliably after successful verification and entitlement granting for every transaction (from purchase() result and Transaction.updates) 8.
+                     * Check if the Transaction.updates listener task is running correctly and not being prematurely cancelled 62.
+                     * Entitlements Not Updating:
+                     * Verify transactions are being successfully verified (check VerificationResult).
+                     * Ensure updateCustomerProductStatus() (or similar logic using Transaction.currentEntitlements) is called after successful purchases/updates.
+                     * Check the logic within updateCustomerProductStatus() for correct handling of different product types and states (revocationDate, isUpgraded, RenewalState).
+                     * Ensure UI is correctly bound to the state properties being updated (@Published properties, Main Actor updates).
+                     * Subscription Status Incorrect:
+                     * Use SubscriptionInfo.status(for:) or .subscriptionStatusTask to get the current status 68.
+                     * Check the RenewalState (.subscribed, .inGracePeriod grant access) 47.
+                     * Verify RenewalInfo details like willAutoRenew, renewalDate, isInBillingRetry 39.
+                     * Remember Sandbox renewal rates differ from production 12.
+                     * Debugging Tools:
+                     * Console Logs: Add detailed logging throughout your StoreKit flows.
+                     * Breakpoints: Set breakpoints in purchase methods, listener callbacks, and entitlement logic.
+                     * Xcode Transaction Manager: Inspect transaction states during local testing 16.
+                     * Device Console: Check device logs (via Xcode > Window > Devices and Simulators) for system-level StoreKit messages.
+5.5 Sandbox Environment: Quirks, Limitations, and Best Practices
+The Sandbox environment uses real App Store Connect product data but simulates payment processing 52.
+                     * Setup:
+                     * Create Sandbox Tester accounts in App Store Connect (Users and Access > Sandbox > Testers) 88.
+                     * Log in with a Sandbox account on a test device (Settings > App Store > Sandbox Account, not the main Apple ID). Development-signed builds automatically use Sandbox when a Sandbox user is logged in 52.
+                     * Quirks & Limitations:
+                     * Renewal Rates: Subscription durations are significantly accelerated (e.g., 1 month becomes ~5 minutes) 12. Rates can be adjusted in ASC or device settings 12.
+                     * No Real Charges: Purchases are free 6.
+                     * Propagation Delay: Changes made in ASC (prices, metadata) can take up to an hour to reflect in Sandbox 52.
+                     * Environment Differences: Sandbox behavior might occasionally differ slightly from Production or Xcode local testing 72. Always test in all relevant environments.
+                     * Email: Purchase confirmation emails are not sent 35.
+                     * Interrupted Purchases: Can be simulated via ASC settings for a Sandbox user 52.
+                     * Refunds: Can be requested via beginRefundRequest. Approval/denial can be simulated 35.
+                     * Server Notifications: A separate Sandbox endpoint needs to be configured in ASC to test server notifications 26.
+                     * Best Practices:
+                     * Use Sandbox for end-to-end testing involving App Store Connect data and server interactions (validation, notifications) 52.
+                     * Create multiple Sandbox accounts to test different scenarios (new user, existing subscriber, Family Sharing).
+                     * Use the "Clear Purchase History" option in Sandbox account settings on the device for repeatable testing (especially for introductory offers) 52.
+                     * Be aware of accelerated renewal rates when testing subscription logic.
+                     * Test edge cases like interrupted purchases and billing issues using Sandbox settings 45.
+                     * Validate receipts/transactions against the Sandbox validation URL (https://sandbox.itunes.apple.com/verifyReceipt for SK1, or the Sandbox endpoint for App Store Server API) 24.
+6. Advanced Topics & Best Practices
+Beyond the basics, robust StoreKit 2 implementations require attention to edge cases, user experience, and security.
+6.1 Robust Error Handling Strategies
+StoreKit 2's async/await APIs throw errors that need proper handling.
+                     * Use do-catch: Wrap all await calls to StoreKit functions (e.g., Product.products(for:), product.purchase(), Transaction.updates iteration, AppStore.sync()) in do-catch blocks 107.
+                     * Inspect StoreKitError: Catch StoreKitError specifically to handle common StoreKit issues like .userCancelled, .networkError, .systemError, .notAvailableInStorefront, .notEntitled, .unknown 65.
+                     * Handle URLError: Network-related issues often manifest as URLError (e.g., .notConnectedToInternet, .timedOut) 65. Provide specific feedback for network problems.
+                     * Handle VerificationError: When processing VerificationResult, catch the VerificationError in the .unverified case 70.
+                     * Provide User Feedback: Don't just log errors. Translate errors into user-friendly messages or UI states (e.g., "Purchase failed. Please check your connection and try again.", "Could not load products. Please try again later.") 22.
+                     * Retry Logic: For transient errors like network issues, consider implementing a limited, delayed retry mechanism for operations like fetching products. Avoid retrying purchase attempts automatically.
+                     * Centralized Handling: Consider a centralized error handling function or system, potentially passing context about where the error occurred, to avoid repetitive catch blocks 107.
+                     * Task Cancellation: Be mindful of task cancellation, especially when using .task modifiers in SwiftUI. If a view disappears while an async StoreKit operation is in progress, the task might be cancelled. Ensure critical operations like finishing transactions are handled appropriately, potentially using Task.detached or ensuring the task's parent view persists 108. Check for CancellationError or use Task.isCancelled.
+6.2 Handling Edge Cases
+                     * Refunds (revocationDate):
+                     * Transactions can be refunded by Apple Support or automatically (e.g., for subscription upgrades).
+                     * Refunded/revoked transactions will have a non-nil revocationDate and potentially a revocationReason 35.
+                     * Your Transaction.updates listener and/or server notifications (REFUND, REVOKE) will receive these updates 35.
+                     * Update entitlement logic: Check revocationDate == nil when determining access 70. Revoke access immediately upon detecting a revocation.
+                     * Transaction.currentEntitlements automatically excludes revoked transactions 70.
+                     * Testing: Use the Transaction Manager (Debug > StoreKit > Manage Transactions > Refund) or Sandbox refund simulation (REJECT keyword for declined) 16.
+                     * Interruptions:
+                     * Purchases can be interrupted (require action outside the app, like payment updates or T&C agreement) 100.
+                     * product.purchase() might return .pending or fail initially.
+                     * The system prompts the user to resolve the issue.
+                     * If resolved, a new successful Transaction is delivered via Transaction.updates.
+                     * Testing: Use "Enable Interrupted Purchases" in the .storekit editor menu or Sandbox settings 81. Use "Resolve Issue" in the Transaction Manager 81.
+                     * Restoring Purchases (AppStore.sync()):
+                     * StoreKit 2 automatically syncs transactions across devices, making manual restoration less critical than in StoreKit 1 1. Transaction.currentEntitlements should reflect the user's state on app launch 70.
+                     * However, providing a "Restore Purchases" button is still recommended as a fallback for users experiencing issues or wanting explicit confirmation 11.
+                     * Implement the button action by calling await AppStore.sync() 110. This method explicitly asks StoreKit to sync with the App Store account 109.
+                     * Apple guidance states sync() should only be called in response to explicit user action 109.
+                     * Any newly synced transactions will be delivered via the Transaction.updates listener 110. Ensure your listener correctly handles and finishes these transactions and updates entitlements. You might also re-query Transaction.currentEntitlements after sync() completes (though the listener should handle it) 110.
+Swift
+// Example Restore Button Action
+@State private var isRestoring = false
+
+Button("Restore Purchases") {
+   isRestoring = true
+   Task {
+       defer { isRestoring = false }
+       do {
+           try await AppStore.sync()
+           // Optional: Show success message - actual updates handled by listener
+           print("Sync completed. Listener will handle any new transactions.")
+            // You might manually trigger an entitlement refresh here if needed
+            // await storeManager.updateCustomerProductStatus()
+       } catch {
+           print("Sync failed: \(error)")
+           // Show error message
+       }
+   }
+}
+
+.disabled(isRestoring)
+.overlay { if isRestoring { ProgressView() } }
+```
+6.3 Multi-device Synchronization Strategies
+StoreKit 2 aims to automatically keep transaction state synchronized across devices signed into the same Apple ID 1.
+                     * Automatic Sync: Purchases made on one device should appear via Transaction.updates or be reflected in Transaction.currentEntitlements on other devices relatively quickly 30.
+                     * Server as Source of Truth: The most robust strategy relies on your server (validated against App Store Server API/Notifications) as the central source of entitlement truth 8.
+                     * When the app launches or resumes, it queries your server for the current entitlement status associated with the user's account (if applicable).
+                     * The app updates its local state based on the server response.
+                     * Client-side StoreKit checks (currentEntitlements, updates) act as a local cache or trigger updates to the server.
+                     * Client-Side Only (Less Robust): If not using a server:
+                     * Rely heavily on Transaction.currentEntitlements at launch and after any transaction updates 70.
+                     * The Transaction.updates listener is crucial for receiving changes made on other devices 30.
+                     * The AppStore.sync() button provides a manual way for users to force a refresh 109.
+                     * appAccountToken: Use this purchase option to link transactions across devices to a specific user account within your system, simplifying server-side logic 1.
+6.4 UI/UX Best Practices
+A smooth and trustworthy purchase experience is vital. Follow Apple's Human Interface Guidelines (HIG) 22.
+                     * Clarity and Transparency:
+                     * Clearly display the full price (product.displayPrice) and subscription terms (duration, renewal info) before purchase 22.
+                     * Use simple, concise product names and descriptions 22.
+                     * Clearly explain what the purchase unlocks.
+                     * If offering trials or introductory prices, display the terms and the price after the offer ends clearly.
+                     * Highlight Family Sharing benefits if applicable 22.
+                     * Integrated Experience: The store/purchase flow should feel like part of your app, not a separate entity. Match the visual style 22. StoreKit SwiftUI views help achieve this 3.
+                     * Loading/Pending States:
+                     * Show clear loading indicators (e.g., ProgressView) while fetching products or processing purchases. Disable purchase buttons during these states 7.
+                     * If a purchase becomes .pending, update the UI to clearly communicate this status to the user (e.g., "Purchase pending approval").
+                     * Feedback:
+                     * Provide immediate feedback upon successful purchase (e.g., confirmation message, UI update unlocking content).
+                     * Display clear, user-friendly error messages if something goes wrong.
+                     * Use the standard system confirmation sheet; do not replicate it 22.
+                     * Offer Value: Let users experience the app's value before asking for payment, perhaps via limited free content or a free trial 22.
+                     * Payment Availability: Check StoreKit.AppStore.canMakePayments (StoreKit 1) or ensure appropriate UI handling if payments might be restricted (e.g., parental controls). Consider hiding the store or explaining why it's unavailable 22. StoreKit 2 APIs generally handle this implicitly by failing gracefully if payments aren't possible.
+                     * Refunds: If implementing in-app refund requests (beginRefundRequest), provide context (product image, name, purchase date) to help users identify the correct transaction. Offer alternative solutions (like fulfilling a missing item) alongside the refund option 22. Use simple button titles like "Request a Refund" 22.
+6.5 Accessibility (A11y) and Localization (L10n) Considerations
+                     * Localization (L10n):
+                     * StoreKit automatically handles localization for product information fetched from the App Store (displayName, description, displayPrice) based on the device's locale 3.
+                     * StoreKit SwiftUI views also handle localization automatically 3.
+                     * Localize all custom UI strings related to your store, offers, and purchase flows using standard iOS localization techniques (e.g., String(localized:...) , .strings files) 112.
+                     * Test different locales using the .storekit editor's "Default Localization" setting or by changing the device/simulator language 97.
+                     * Ensure localized text fits layouts without truncation or overlapping 112.
+                     * Accessibility (A11y):
+                     * Use standard SwiftUI/UIKit controls, which generally have good default accessibility support.
+                     * Ensure custom purchase buttons and UI elements have clear accessibility labels, values, and hints for VoiceOver users.
+                     * Test navigation and interaction using VoiceOver and other accessibility features (Switch Control, Dynamic Type).
+                     * Ensure sufficient color contrast for text and interactive elements.
+                     * Support Dynamic Type to allow users to adjust text size.
+                     * The system-provided purchase sheets and StoreKit views are designed with accessibility in mind.
+6.6 Security Considerations Beyond Server Validation
+While server validation is paramount, consider these additional points:
+                     * Device Check: Use the DeviceCheck framework to generate tokens that, combined with server logic, can help assess device integrity and reduce fraudulent activity or unauthorized access from compromised devices. This is separate from StoreKit but complementary.
+                     * Obfuscation: While not foolproof, basic code obfuscation can make it slightly harder for attackers to reverse-engineer your client-side purchase logic.
+                     * Secure Server Communication: Always use HTTPS for communication between the app and your server 88. Protect API keys and shared secrets diligently.
+                     * Rate Limiting: Implement rate limiting on your server endpoints that receive data from the app (like JWS submissions) to prevent abuse.
+                     * Monitor Unusual Activity: Log and monitor transaction patterns on your server for signs of potential fraud (e.g., unusually high purchase volumes from specific accounts or IP addresses).
+                     * appAccountToken: Use this to securely link purchases to your user accounts, making server-side tracking and validation more robust 40.
+7. Migration from StoreKit 1 to StoreKit 2
+Migrating from the original StoreKit API to StoreKit 2 involves significant changes due to the shift from delegate/observer patterns to Swift concurrency and the move from app receipts to JWS-signed transactions.
+7.1 Key Differences Recap
+                     * API Style: Delegate/Callback (SKPaymentTransactionObserver, SKProductsRequestDelegate) vs. async/await (product.purchase(), Product.products(for:), Transaction.updates) 1.
+                     * Transaction Data: App Receipt (single encrypted blob) vs. JWS-signed Transaction objects 1.
+                     * Validation: Manual receipt parsing/validation (client or server via verifyReceipt) vs. Built-in client verification (VerificationResult) + Server API/JWS validation 1.
+                     * Transaction Handling: SKPaymentQueue vs. Transaction.updates listener and product.purchase() result 8.
+                     * Restoration: restoreCompletedTransactions() vs. Automatic syncing + optional AppStore.sync() 1.
+                     * Subscription Status: Limited info in receipt vs. Rich SubscriptionInfo / RenewalInfo / RenewalState APIs 1.
+                     * Testing: Primarily Sandbox vs. Enhanced local testing with .storekit files and StoreKitTest 3.
+7.2 Migration Considerations
+                     * Minimum OS Target: StoreKit 2 requires iOS 15, macOS 12, tvOS 15, watchOS 8 or later 20. If your app must support older OS versions, you'll need to maintain both StoreKit 1 and StoreKit 2 implementations using #available checks 20. This significantly increases complexity. If possible, raising the minimum deployment target simplifies migration immensely.
+                     * Backend Changes: Migrating the client almost always necessitates backend changes 20. Your server must be updated to:
+                     * Stop using the deprecated verifyReceipt endpoint 19.
+                     * Validate incoming JWS (transaction.jwsRepresentation) from the client 27.
+                     * Optionally/Additionally, interact with the App Store Server API using JWT authentication 20.
+                     * Handle App Store Server Notifications V2 (recommended over V1) 40.
+                     * Plan and execute server-side changes concurrently with client-side migration. The App Store Server Library can aid this process 26.
+                     * Phased Rollout: Due to the complexity, consider using feature flags or A/B testing to roll out the StoreKit 2 implementation gradually, especially if supporting both SK1 and SK2.
+                     * Data Migration & Consistency:
+                     * The originalTransactionId remains consistent between StoreKit 1 receipts and StoreKit 2 Transaction objects for the same subscription series 25. This is key for linking user history.
+                     * The App Store Server Library includes utilities to extract transaction IDs from old receipts during the transition period 27.
+                     * Ensure your entitlement logic correctly handles data from both systems if running them concurrently.
+7.3 Step-by-Step Migration Guidance Overview
+This assumes you can target iOS 15+ and perform a full migration. Adjust with #available checks if supporting older OS.
+                     1. Plan: Identify all code interacting with StoreKit 1 APIs (SKPaymentQueue, SKProductsRequest, delegates, receipt handling). Plan corresponding backend changes (JWS validation, Server API integration).
+                     2. Implement Backend: Update your server to handle JWS validation and/or App Store Server API calls. Set up V2 Server Notifications. Use the App Store Server Library if possible 26.
+                     3. Remove SK1 Observers: Remove SKPaymentQueue.default().add(self) and the SKPaymentTransactionObserver conformance and methods 8.
+                     4. Replace Product Fetching: Replace SKProductsRequest and its delegate methods with async/await Product.products(for:) 8. Update product storage and UI accordingly.
+                     5. Replace Purchase Flow: Replace SKPaymentQueue.default().add(payment) with await product.purchase() 8. Handle the Product.PurchaseResult enum (.success, .userCancelled, .pending) 8.
+                     6. Implement Transaction Listener: Add the Task iterating Transaction.updates early in the app lifecycle (e.g., in your StoreManager init) to handle external transactions, renewals, and unfinished transactions 8.
+                     7. Update Entitlement Logic: Replace receipt-based entitlement checks with logic based on Transaction.currentEntitlements 8. Query this at launch and after transaction updates.
+                     8. Replace Receipt Handling:
+                     * Remove code fetching the app receipt (Bundle.main.appStoreReceiptURL) 8.
+                     * Instead of sending the receipt data to your server, send the transaction.jwsRepresentation from the verified Transaction object 24.
+                     9. Replace Restoration: Remove calls to SKPaymentQueue.default().restoreCompletedTransactions(). Implement an optional "Restore Purchases" button calling await AppStore.sync() 8. Rely primarily on currentEntitlements and the updates listener.
+                     10. Finish Transactions: Ensure await transaction.finish() is called after verification and entitlement grant for all successful transactions from purchase() and updates 8. This replaces SKPaymentQueue.default().finishTransaction() 8.
+                     11. Test Thoroughly: Use .storekit files extensively for local testing of various flows (purchases, renewals, errors, interruptions, refunds) 15. Test with Sandbox for end-to-end validation including server interactions 52. Use TestFlight for broader testing 6. If supporting both SK1 and SK2, test both paths rigorously on appropriate OS versions/simulators.
+Migrating from StoreKit 1 is a substantial task, primarily driven by the shift to async/await and the fundamental change in transaction handling (JWS/Server API vs. Receipts). Careful planning, particularly coordinating client and server changes, is essential for a smooth transition.
+8. Quick Reference & Resources
+This section provides a quick lookup table for key StoreKit 2 APIs and curated links to essential documentation and resources.
+8.1 Table: Key StoreKit 2 APIs (iOS 17+ Focus)
+Category
+	API Element
+	Description
+	Key Use Case
+	Core Types
+	Product struct
+	Represents an IAP item (details, price, purchase methods).
+	Fetching, displaying, purchasing products.
+	
+
+	Transaction struct
+	Represents a completed purchase/renewal event (details, JWS).
+	Handling purchase results, checking history/entitlements.
+	
+
+	SubscriptionInfo struct
+	Nested in Product, holds auto-renewable subscription details.
+	Accessing group ID, period, offers, status.
+	
+
+	RenewalInfo struct
+	Nested in Status, holds details about the next renewal period.
+	Checking auto-renew status, expiration, billing state.
+	
+
+	RenewalState enum
+	Possible states of a subscription entitlement.
+	Determining service access (.subscribed, .inGracePeriod).
+	
+
+	VerificationResult<T> enum
+	Wraps data (e.g., Transaction) indicating JWS verification status.
+	Safely accessing verified transaction/renewal data.
+	
+
+	StoreKitError enum
+	Common errors thrown by StoreKit APIs.
+	Catching and handling specific StoreKit failures.
+	Product Fetch/Display
+	Product.products(for: Set<String>) static func
+	Asynchronously fetches Product details from App Store/.storekit file.
+	Loading products to display in the store UI.
+	
+
+	product.displayName String
+	Localized product name.
+	Displaying product title.
+	
+
+	product.description String
+	Localized product description.
+	Displaying product details.
+	
+
+	product.displayPrice String
+	Localized price string (e.g., "$9.99", "€4.99/mo").
+	Displaying the price to the user.
+	
+
+	product.price Decimal
+	The numerical price value.
+	Performing calculations (rarely needed for display).
+	
+
+	product.subscription SubscriptionInfo?
+	Access SubscriptionInfo if the product is an auto-renewable subscription.
+	Getting subscription-specific details.
+	Purchase
+	product.purchase(options:) async func
+	Initiates the purchase flow for the product.
+	Starting a purchase when a user taps a buy button.
+	
+
+	Product.PurchaseOption struct
+	Options for purchase (e.g., appAccountToken, promotionalOffer).
+	Linking purchases to accounts, applying offers.
+	
+
+	Product.PurchaseResult enum
+	Result of a purchase attempt (.success, .userCancelled, .pending).
+	Handling the outcome of the purchase() call.
+	Transaction/Entitlement
+	Transaction.updates AsyncSequence
+	Emits transactions occurring outside the app or unfinished ones.
+	Listening for renewals, external purchases, Ask to Buy approvals.
+	
+
+	Transaction.currentEntitlements AsyncSequence
+	Emits latest valid transactions for non-consumables & active subscriptions.
+	Determining current user access/entitlements at launch or after updates.
+	
+
+	Transaction.all AsyncSequence
+	Emits all transactions in the user's history for the app.
+	Accessing the complete purchase history (including expired/refunded).
+	
+
+	transaction.finish() async func
+	Marks a transaction as processed by the app. Must be called.
+	Acknowledging transaction delivery after granting entitlement.
+	
+
+	transaction.jwsRepresentation String
+	The App Store-signed JWS payload for the transaction.
+	Sending to your server for validation.
+	
+
+	transaction.id UInt64
+	Unique ID for this transaction event.
+	Identifying specific transactions.
+	
+
+	transaction.productID String
+	Identifier of the purchased product.
+	Knowing which product was purchased.
+	
+
+	transaction.purchaseDate Date
+	Date of the purchase/renewal.
+	Recording purchase time.
+	
+
+	transaction.expirationDate Date?
+	Date subscription expires (for auto-renewables/non-renewing).
+	Checking subscription validity period.
+	
+
+	transaction.revocationDate Date?
+	Date the transaction was refunded/revoked.
+	Detecting refunds or Family Sharing revocations.
+	
+
+	transaction.ownershipType enum?
+	Indicates if purchased by user or shared via Family Sharing.
+	Customizing UI/logic for Family Sharing.
+	Subscription Status
+	SubscriptionInfo.status(for: String) static func
+	Fetches current status(es) for a subscription group.
+	Checking if a user is subscribed to a group.
+	
+
+	Status.state RenewalState
+	The current renewal state (subscribed, expired, etc.).
+	Determining service entitlement.
+	
+
+	Status.renewalInfo VerificationResult<RenewalInfo>
+	Details about the next renewal period.
+	Checking willAutoRenew, renewalDate, billing issues.
+	
+
+	RenewalInfo.willAutoRenew Bool
+	Indicates if auto-renewal is enabled.
+	Knowing if the subscription is set to renew.
+	
+
+	RenewalInfo.renewalDate Date?
+	Date of next renewal attempt or expiration.
+	Displaying expiration/renewal date.
+	
+
+	RenewalInfo.isInBillingRetry Bool
+	True if in billing retry period (payment failed).
+	Handling billing issues (service may be off unless grace period).
+	
+
+	RenewalInfo.gracePeriodExpirationDate Date?
+	Expiration date of the billing grace period (if active).
+	Providing service during grace period.
+	Offers
+	product.subscription?.isEligibleForIntroOffer Bool
+	Checks eligibility for an introductory offer in the group.
+	Determining if intro offer can be displayed/applied.
+	
+
+	product.subscription?.introductoryOffer Offer?
+	Details of the configured introductory offer.
+	Displaying intro offer terms.
+	
+
+	.promotionalOffer(...) PurchaseOption
+	Applies a server-signed promotional offer to a purchase.
+	Redeeming promotional offers.
+	
+
+	AppStore.presentOfferCodeRedeemSheet(in:) func
+	Presents the system sheet for redeeming offer codes (UIKit).
+	Allowing users to enter offer codes.
+	Testing
+	.storekit file
+	Xcode file for defining products and simulating scenarios locally.
+	Local testing without ASC or network.
+	
+
+	Transaction Manager
+	Xcode debug menu (Debug > StoreKit > Manage Transactions) for inspecting/manipulating local transactions.
+	Simulating refunds, resolving interruptions, deleting transactions locally.
+	
+
+	StoreKitTest.SKTestSession class
+	Framework class for automating local StoreKit tests in XCTest.
+	Writing unit/integration tests for IAP logic.
+	SwiftUI Views
+	ProductView
+	Displays a single IAP product.
+	Building custom store layouts.
+	
+
+	StoreView
+	Displays a list of IAP products.
+	Quickly creating a standard product list store.
+	
+
+	SubscriptionStoreView
+	Displays subscription options within a group.
+	Merchandising auto-renewable subscriptions easily.
+	SwiftUI Modifiers
+	.onInAppPurchaseCompletion(...)
+	Action performed when a purchase from a StoreKit view completes.
+	Handling purchase results from StoreKit views.
+	
+
+	.subscriptionStatusTask(for:action:)
+	Observes subscription status changes for a group ID.
+	Reacting to subscription state changes in the UI.
+	
+
+	.currentEntitlementTask(for:action:)
+	Observes entitlement changes for a specific non-consumable product ID.
+	Reacting to non-consumable purchase/revocation.
+	
+
+	.offerCodeRedemption(isPresented:onCompletion:)
+	Presents the offer code redemption sheet.
+	Allowing users to enter offer codes in SwiftUI.
+	
+
+	.manageSubscriptionsSheet(...)
+	Presents the system sheet for managing subscriptions.
+	Providing an in-app way to manage subscriptions.
+	
+
+	.storeButton(.visible/.hidden, for:)
+	Controls visibility of auxiliary buttons (Redeem, Policies, Sign In) in StoreKit views.
+	Customizing StoreKit view buttons.
+	8.2 Curated Links
+Official Apple Documentation:
+                     * StoreKit Framework: https://developer.apple.com/documentation/storekit/ 4
+                     * In-App Purchase (StoreKit 2 Overview): https://developer.apple.com/documentation/storekit/in-app-purchase 5
+                     * Implementing a Store (Sample Code): https://developer.apple.com/documentation/storekit/implementing-a-store-in-your-app-using-the-storekit-api 33
+                     * Testing (Xcode, Sandbox): https://developer.apple.com/documentation/storekit/testing-at-all-stages-of-development-with-xcode-and-the-sandbox 5
+                     * Setting up StoreKit Testing in Xcode: https://developer.apple.com/documentation/xcode/setting-up-storekit-testing-in-xcode 15
+                     * StoreKitTest Framework: https://developer.apple.com/documentation/storekittest 17
+                     * App Store Server API: https://developer.apple.com/documentation/appstoreserverapi 26
+                     * App Store Server Notifications V2: https://developer.apple.com/documentation/appstoreservernotifications 1
+                     * Human Interface Guidelines: In-App Purchase: https://developer.apple.com/design/human-interface-guidelines/in-app-purchase 22
+                     * App Store Connect Help: In-App Purchases: https://developer.apple.com/help/app-store-connect/manage-in-app-purchases/overview-for-configuring-in-app-purchases/ 53
+Relevant WWDC Sessions (Search by Title & Year on developer.apple.com/videos):
+                     * WWDC 2021:
+                     * Meet StoreKit 2 (10114) 1
+                     * Manage in-app purchases on your server (10174) 1
+                     * Support customers and handle refunds (10175) 1
+                     * WWDC 2022:
+                     * What's new in StoreKit testing (10039) 1
+                     * Implement proactive in-app purchase restore (110404) 1
+                     * Explore in-app purchase integration and migration (10040) 90
+                     * What's new with in-app purchase (10041) 1
+                     * WWDC 2023:
+                     * Meet StoreKit for SwiftUI (10013) 1
+                     * What's new in StoreKit 2 and StoreKit Testing in Xcode (10140) 1
+                     * What's new in App Store server APIs (10142) 93
+                     * Meet the App Store Server Library (10144) 92
+                     * WWDC 2024:
+                     * Implement App Store Offers (10110) 85
+High-Quality Community Tutorials/Articles (Examples):
+                     * Note: External links change. Search for recent guides from reputable sources.
+                     * RevenueCat Blog (Often covers StoreKit 2 topics, migration, testing) 19
+                     * Kodeco (formerly Ray Wenderlich) (Tutorials on StoreKit testing, implementation) 99
+                     * Superwall Blog (SwiftUI implementation examples) 7
+                     * Qonversion Blog (Migration, Server API guides) 8
+                     * Swift with Majid (SwiftUI view modifiers) 75
+9. Conclusion
+StoreKit 2 marks a significant advancement for implementing in-app purchases and subscriptions on Apple platforms, particularly for developers using modern Swift and SwiftUI. Its async/await-based APIs, JWS-signed transactions, comprehensive subscription status information, and vastly improved testing capabilities offer a more streamlined, secure, and informative development experience compared to StoreKit 1 1.
+Successfully leveraging StoreKit 2 requires understanding its core concepts, particularly the transaction lifecycle, the importance of the Transaction.updates listener, and the necessity of server-side validation as the authoritative source of truth for entitlements 8. While the framework handles much of the complexity, developers must diligently manage transaction finishing (transaction.finish()) and implement robust error handling and entitlement logic 8.
+The integration with SwiftUI through dedicated views and modifiers further simplifies building user-friendly purchase flows 3. However, migration from StoreKit 1 demands careful planning, especially regarding backend adjustments to handle JWS and the App Store Server API, and potential complexities if supporting older operating systems 20.
+By embracing StoreKit 2's modern architecture, utilizing its powerful testing tools, and adhering to best practices for security and user experience, developers can build effective and reliable monetization features into their iOS 17+ applications.
+Works cited
+                     1. Meet StoreKit 2 - WWDC21 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2021/10114/
+                     2. What's new in StoreKit 2 and StoreKit Testing in Xcode - WWDC23 - Videos, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2023/10140/
+                     3. StoreKit 2 - Apple Developer, accessed April 15, 2025, https://developer.apple.com/storekit/
+                     4. StoreKit | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/
+                     5. In-App Purchase | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/in-app-purchase
+                     6. In-App Purchase - Apple Developer, accessed April 15, 2025, https://developer.apple.com/in-app-purchase/
+                     7. StoreKit 2 Tutorial with Swift UI - How to add In-App Purchases to your app - Superwall, accessed April 15, 2025, https://superwall.com/blog/make-a-swiftui-app-with-in-app-purchases-and-subscriptions-using-storekit-2
+                     8. Why and How to Migrate from StoreKit 1 to StoreKit 2 - Qonversion, accessed April 15, 2025, https://qonversion.io/blog/migrate-storekit1-storekit2/
+                     9. WWDC21: Meet StoreKit 2 | Apple - YouTube, accessed April 15, 2025, https://www.youtube.com/watch?v=KvNCQyliYUI
+                     10. VerificationResult | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/verificationresult
+                     11. What is it StoreKit 2 and how will it affect Apphud?, accessed April 15, 2025, https://apphud.com/blog/storekit-2-1
+                     12. What's New with In-App Purchases in iOS 15 - WWDC 21 - Nami ML, accessed April 15, 2025, https://www.namiml.com/blog/whats-new-with-in-app-purchases-at-wwdc-21
+                     13. Meet StoreKit 2 | Documentation - WWDC Notes, accessed April 15, 2025, https://wwdcnotes.com/documentation/wwdcnotes/wwdc21-10114-meet-storekit-2/
+                     14. Product.SubscriptionInfo | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo
+                     15. Setting up StoreKit Testing in Xcode | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/xcode/setting-up-storekit-testing-in-xcode/
+                     16. What's new in StoreKit testing - WWDC22 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2022/10039/
+                     17. StoreKit Test | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekittest
+                     18. Meet StoreKit for SwiftUI - WWDC23 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2023/10013/
+                     19. WWDC 2023 highlights: What's in store for subscription apps - RevenueCat, accessed April 15, 2025, https://www.revenuecat.com/blog/engineering/wwdc2023-highlights/
+                     20. StoreKit 1 vs 2: How to Migrate to StoreKit 2 - RevenueCat, accessed April 15, 2025, https://www.revenuecat.com/blog/engineering/migrating-from-storekit-1-to-storekit-2/
+                     21. purchase(options:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/purchase(options:)
+                     22. In-app purchase | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/design/human-interface-guidelines/in-app-purchase
+                     23. Transaction | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/transaction
+                     24. How to validate a receipt on server side with StoreKit 2? - Stack Overflow, accessed April 15, 2025, https://stackoverflow.com/questions/79402090/how-to-validate-a-receipt-on-server-side-with-storekit-2
+                     25. Recommended approach for new auto-renewable subscription purchase using StoreKit 1.0 + Apple Server Notifications 2.0, accessed April 15, 2025, https://developer.apple.com/forums/thread/700930
+                     26. App Store Server API | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/appstoreserverapi
+                     27. How to migration from Original StoreKit to StoreKit2 - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/743587
+                     28. StoreKit2: .purchase() not working after expiry of subscription in app, but renewing in AppStore sandbox does... - Apple Developer Forums, accessed April 15, 2025, https://forums.developer.apple.com/forums/thread/723126
+                     29. StoreKit 2 - Use-case for Transaction.unfinished - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/726200
+                     30. updates | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/transaction/updates
+                     31. Unfinished transactions not being emitted on start of app - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/722222
+                     32. presentOfferCodeRedeemSheet(in:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/appstore/presentoffercoderedeemsheet(in:)
+                     33. Implementing a store in your app using the StoreKit API | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/implementing-a-store-in-your-app-using-the-storekit-api
+                     34. Product | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product
+                     35. Testing refund requests | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/testing-refund-requests
+                     36. revocationDate | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/transaction/revocationdate
+                     37. StoreKit 2: how can we test Family Sharing? - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/696366
+                     38. Family sharing in-app purchases iOS - Guide to why, what & how - RevenueCat, accessed April 15, 2025, https://www.revenuecat.com/blog/engineering/implement-apple-family-sharing/
+                     39. Product.SubscriptionInfo.RenewalInfo | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/renewalinfo
+                     40. What is the best way to implement in-app purchases without a third-party service? - Reddit, accessed April 15, 2025, https://www.reddit.com/r/swift/comments/11jujq6/what_is_the_best_way_to_implement_inapp_purchases/
+                     41. How to handle Product.PurchaseOption in StoreKit 2? - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/690384
+                     42. isEligibleForIntroOffer | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/iseligibleforintrooffer
+                     43. Product.SubscriptionInfo.Status | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/status-swift.struct
+                     44. StoreKit 2 How to get the product id that will be used when the subscription auto-renews, accessed April 15, 2025, https://developer.apple.com/forums/thread/726155
+                     45. Testing failing subscription renewals and In-App Purchases - Apple Developer, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/testing-failing-subscription-renewals-and-in-app-purchases
+                     46. gracePeriodExpirationDate | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/renewalinfo/graceperiodexpirationdate
+                     47. Product.SubscriptionInfo.RenewalState | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/renewalstate
+                     48. StoreKit 2 with different access b… | Apple Developer Forums, accessed April 15, 2025, https://developer.apple.com/forums/thread/739263
+                     49. Auto-renewable Subscriptions - App Store - Apple Developer, accessed April 15, 2025, https://developer.apple.com/app-store/subscriptions/
+                     50. How to Set Up iOS In-App Purchases: Subscription Configuration - Adapty, accessed April 15, 2025, https://adapty.io/blog/how-to-set-up-ios-in-app-purchases/
+                     51. App Store Server API changelog | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/appstoreserverapi/app-store-server-api-changelog
+                     52. Testing In-App Purchases with sandbox | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/testing-in-app-purchases-with-sandbox
+                     53. App Store Connect - Help - Apple Developer, accessed April 15, 2025, https://developer.apple.com/help/app-store-connect/
+                     54. Managing in-app purchases | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/appstoreconnectapi/managing-in-app-purchases
+                     55. StoreKit | Apple Developer Forums, accessed April 15, 2025, https://developer.apple.com/forums/tags/storekit?page=7&sortBy=newest
+                     56. Implementing promotional offers in your app | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/implementing-promotional-offers-in-your-app
+                     57. Generate keys for in-app purchases - Apple Developer, accessed April 15, 2025, https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/generate-keys-for-in-app-purchases/
+                     58. Supporting Family Sharing in your app | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/supporting-family-sharing-in-your-app
+                     59. Explore Family Sharing for In-App Purchases - Tech Talks - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/tech-talks/110345/
+                     60. App Store Connect API | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/appstoreconnectapi
+                     61. Products.product always returns an empty array - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/748015
+                     62. StoreKit 2 transactions listener not working - Apple Developer Forums, accessed April 15, 2025, https://forums.developer.apple.com/forums/thread/732096
+                     63. products(for:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/products(for:)
+                     64. Do you need to use SKProductsRequest to fetch products in the Sandbox envrionment?, accessed April 15, 2025, https://developer.apple.com/forums/thread/724853
+                     65. StoreKitError | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/storekiterror
+                     66. How to implemet a free trial period for StoreKit 2 subscriptions in iOS - Tanaschita.com, accessed April 15, 2025, https://tanaschita.com/20231113-subscriptions-introductory-offers/
+                     67. How to properly use new StoreKit 2 views/modifiers/functionality for auto-renewable subscriptions - Apple Developer, accessed April 15, 2025, https://developer.apple.com/forums/thread/761221
+                     68. subscriptionStatusTask(for:priority:action:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/swiftui/view/subscriptionstatustask(for:priority:action:)
+                     69. offerCodeRedemption(isPresented:onCompletion:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/storeview/4203466-offercoderedemption
+                     70. currentEntitlements | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/transaction/currententitlements
+                     71. Implement proactive in-app purchase restore - WWDC22 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2022/110404/
+                     72. StoreKit | Apple Developer Forums, accessed April 15, 2025, https://developer.apple.com/forums/tags/storekit?page=10
+                     73. status(for:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/status(for:)
+                     74. subscriptionStatus | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/transaction/subscriptionstatus
+                     75. Mastering StoreKit 2. SwiftUI view modifiers. - Swift with Majid, accessed April 15, 2025, https://swiftwithmajid.com/2023/08/29/mastering-storekit2-swiftui-view-modifiers/
+                     76. renewalInfo | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/product/subscriptioninfo/status-swift.struct/renewalinfo
+                     77. Handling Subscriptions Billing | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/handling-subscriptions-billing
+                     78. Improve your subscriber retention with App Store features - Tech Talks - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/tech-talks/111386/
+                     79. How to test Billing Grace Period and Billing Retry for a Subscription - delasign, accessed April 15, 2025, https://www.delasign.com/blog/storekit-test-billing-grace-period-xcode/
+                     80. App Store Server API in StoreKit 2: Main Endpoints and Use Cases - Qonversion, accessed April 15, 2025, https://qonversion.io/blog/app-store-server-api/
+                     81. Testing In-App Purchases in Xcode | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/testing-in-app-purchases-in-xcode
+                     82. Implement Free Trials in Your App With StoreKit 2: a Step-by-Step Guide | HackerNoon, accessed April 15, 2025, https://hackernoon.com/implement-free-trials-in-your-app-with-storekit-2-a-step-by-step-guide
+                     83. How to get rid of Introductory Offer with Free Trial when user already used this offer?, accessed April 15, 2025, https://stackoverflow.com/questions/77918530/how-to-get-rid-of-introductory-offer-with-free-trial-when-user-already-used-this
+                     84. StoreKit Promotional Offer Purchas… | Apple Developer Forums, accessed April 15, 2025, https://developer.apple.com/forums/thread/761905
+                     85. Implement App Store Offers - WWDC24 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2024/10110/
+                     86. Promotional Offers and Discounts - Building In-App Purchases with StoreKit in Swift, accessed April 15, 2025, https://app.studyraid.com/en/read/6181/136359/promotional-offers-and-discounts
+                     87. Issue with Offer Code Redemption: SKPaymentQueue Observer Not Notified in StoreKit, accessed April 15, 2025, https://stackoverflow.com/questions/78808416/issue-with-offer-code-redemption-skpaymentqueue-observer-not-notified-in-storek
+                     88. iOS In-App Purchases: A Comprehensive Guide for Swift Developers | Bugfender, accessed April 15, 2025, https://bugfender.com/blog/ios-in-app-purchases/
+                     89. Choosing a receipt validation technique | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/choosing-a-receipt-validation-technique
+                     90. Explore in-app purchase integration and migration - WWDC22 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2022/10040/
+                     91. Receipt Validation in StoreKit 1 vs StoreKit 2 Server API - Qonversion, accessed April 15, 2025, https://qonversion.io/blog/storekit1-storeki2-receipt-validation/
+                     92. WWDC23: What's new in App Store server APIs | Apple - YouTube, accessed April 15, 2025, https://www.youtube.com/watch?v=TB8RNdXsWtI
+                     93. WWDC23 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/wwdc2023/
+                     94. WWDC24: Explore App Store server APIs for In-App Purchase | Apple - YouTube, accessed April 15, 2025, https://www.youtube.com/watch?v=lzQB0FFnxoQ
+                     95. All Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/all-videos/
+                     96. init(configurationFileNamed:) | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekittest/sktestsession/init(configurationfilenamed:)
+                     97. Setting up StoreKit config in Xcode | Nami Public Documentation, accessed April 15, 2025, https://docs.namiml.com/integrations/billing-platforms/apple-integration/testing-and-development/setting-up-storekit-config-in-xcode
+                     98. Apple App Store & TestFlight | In-App Subscriptions Made Easy - RevenueCat, accessed April 15, 2025, https://www.revenuecat.com/docs/test-and-launch/sandbox/apple-app-store
+                     99. StoreKit Testing in Xcode 12: Getting Started - Kodeco, accessed April 15, 2025, https://www.kodeco.com/15410082-storekit-testing-in-xcode-12-getting-started/page/2
+                     100. Testing in-app purchases with StoreKit transaction manager in Xcode - Apple Developer, accessed April 15, 2025, https://developer.apple.com/documentation/xcode/testing-in-app-purchases-with-storekit-transaction-manager-in-code
+                     101. How to manage Auto-Renewable Subscriptions in XCode - delasign, accessed April 15, 2025, https://www.delasign.com/blog/storekit-manage-subscriptions-xcode/
+                     102. How to change StoreKit Localization in XCode - delasign, accessed April 15, 2025, https://www.delasign.com/blog/storekit-localization/
+                     103. Handling errors | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/handling-errors
+                     104. Overview of testing in sandbox - App Store Connect - Help - Apple Developer, accessed April 15, 2025, https://developer.apple.com/help/app-store-connect/test-in-app-purchases/overview-of-testing-in-sandbox/
+                     105. Should I use StoreKit? : r/iOSProgramming - Reddit, accessed April 15, 2025, https://www.reddit.com/r/iOSProgramming/comments/1eyt35v/should_i_use_storekit/
+                     106. Testing an interrupted purchase | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/testing-an-interrupted-purchase
+                     107. Error handling with async throws - Using Swift, accessed April 15, 2025, https://forums.swift.org/t/error-handling-with-async-throws/63769
+                     108. StoreKit Product.products(for:) works inconsistently: Task.detached resolves the issue—why? - Stack Overflow, accessed April 15, 2025, https://stackoverflow.com/questions/79272968/storekit-product-productsfor-works-inconsistently-task-detached-resolves-the
+                     109. sync() | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/appstore/sync()
+                     110. How do I listen to restore purchase response in Storekit 2? - Stack Overflow, accessed April 15, 2025, https://stackoverflow.com/questions/77914829/how-do-i-listen-to-restore-purchase-response-in-storekit-2
+                     111. How to code and test restore purchases in Swift and Xcode - delasign, accessed April 15, 2025, https://www.delasign.com/blog/swift-storekit-restore-purchases-xcode/
+                     112. Localization - Apple Developer, accessed April 15, 2025, https://developer.apple.com/localization/
+                     113. Apple In-App Purchase - SK2 - Getting Started - Overview, accessed April 15, 2025, https://developers.cleeng.com/docs/apple-in-app-purchase-storekit-2
+                     114. Choosing a StoreKit API for In-App Purchases | Apple Developer Documentation, accessed April 15, 2025, https://developer.apple.com/documentation/storekit/choosing-a-storekit-api-for-in-app-purchases
+                     115. Explore in-app purchase integration and migration - WWDC22 - Videos - Apple Developer, accessed April 15, 2025, https://developer.apple.com/videos/play/wwdc2022/10040/?time=1261

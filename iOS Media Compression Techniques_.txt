@@ -1,0 +1,1232 @@
+﻿A Comprehensive Guide to Media Compression on iOS: From Native Frameworks to Third-Party Powerhouses
+
+
+
+
+Introduction
+
+
+The efficient management of media assets is a cornerstone of modern, high-performance iOS application development. As users capture, share, and consume ever-increasing volumes of high-resolution video and image content, the developer's role in optimizing this data becomes paramount. Effective compression strategies are not merely a technical consideration; they directly impact application responsiveness, network data consumption, device storage footprint, and ultimately, user satisfaction. Navigating the landscape of media compression on iOS requires a deep understanding of the available tools, their inherent trade-offs, and the fundamental principles that govern data reduction.
+This report provides an exhaustive technical guide for iOS developers, detailing the best possible methods for implementing a suite of media compression features. It explores the full spectrum of available technologies, from the powerful, built-in capabilities of Apple's native frameworks like AVFoundation and Image I/O, to the unparalleled flexibility offered by third-party libraries such as ffmpeg-kit. The analysis is structured to provide not only implementation-ready code but also the strategic rationale behind choosing the right tool for a specific task.
+
+
+The Imperative of Compression
+
+
+In an ecosystem where users expect seamless performance, uncompressed media files present a significant challenge. A single minute of uncompressed standard-definition video can occupy over 70 GB of storage, while a two-hour 4K movie could consume a staggering 3.4 TB.1 These figures are untenable for mobile devices. Compression addresses this by making file sizes manageable, which confers several critical benefits:
+* Reduced Storage: Smaller files consume less space on a user's device and in cloud storage, reducing costs and preventing users from running out of space.2
+* Faster Transmission: Compressed media uploads and downloads more quickly, leading to a more responsive user experience and lower bandwidth consumption.3
+* Smoother Playback: For streaming applications, smaller file sizes are essential for minimizing buffering and ensuring a consistent viewing experience, especially over cellular networks.2
+
+
+Deconstructing Compression: A Primer
+
+
+At its core, compression is the process of reducing the number of bits required to represent data. In the context of media, this is achieved through sophisticated algorithms that identify and eliminate redundancy. The methods for achieving this fall into distinct categories, each with its own set of advantages and disadvantages.
+
+
+Lossy Compression
+
+
+Lossy compression achieves significant reductions in file size by permanently discarding some of the original data.5 The algorithms are designed to remove information that is considered less perceptible to the human eye, such as subtle color variations or high-frequency details.3 This process is irreversible; once the data is removed, it cannot be perfectly restored.1 Formats like JPEG for images and codecs like H.264 and HEVC for video are prime examples of lossy compression. While this method results in some quality degradation, the trade-off is often acceptable for the dramatic file size savings, making it ideal for web use and general media sharing.5
+
+
+Lossless Compression
+
+
+In contrast, lossless compression reduces file size by identifying statistical redundancies and reorganizing the data more efficiently without discarding any information.1 When a losslessly compressed file is decompressed, it is a bit-for-bit perfect reconstruction of the original.7 This method is analogous to creating a ZIP archive; the contents are identical upon extraction. Image formats like PNG and RAW, and audio formats like FLAC and WAV, utilize lossless compression.5 While this guarantees the preservation of original quality, the resulting file sizes are significantly larger than those produced by lossy techniques, making them suitable for archival purposes or professional editing workflows where data integrity is paramount.8
+
+
+The Critical Third Category: Visually Lossless Compression
+
+
+For practical application development, a third category emerges: visually lossless compression. This is a specific application of lossy compression where the quality reduction is so minimal that it is imperceptible to the human eye under normal viewing conditions.7 The output is not mathematically identical to the source, but it
+appears to be. This concept is particularly relevant for mobile development, as video captured by an iPhone's camera is already heavily compressed using a lossy codec like H.264 or HEVC.9
+Attempting to re-encode this already-lossy source into a true lossless format (like FFV1) would be counterproductive, as it would dramatically increase the file size without restoring any of the lost quality.1 Therefore, the practical goal for developers is often not true lossless compression, but rather to perform necessary operations (like resizing or adding an effect) and re-encode the media in a way that is
+visually lossless—introducing no new, noticeable artifacts. This is typically achieved by using a high-quality codec and a sufficiently high bitrate.10 Understanding this distinction is crucial for making pragmatic decisions that balance quality, file size, and performance.
+________________
+
+
+Part 1: Advanced Video Compression Strategies
+
+
+This section addresses the requirements for lossy video compression, quality-preserving "lossless" compression, and targeted frame rate reduction. It provides a structured journey from the straightforward native APIs to the highly configurable, powerful third-party tools, equipping the developer to select the appropriate solution for any scenario.
+
+
+Section 1.1: Mastering Native Video Compression with AVFoundation
+
+
+Apple's AVFoundation framework is the primary toolkit for all audio-visual tasks on iOS. It offers a spectrum of tools for video compression, but these tools present a distinct trade-off. A developer can opt for the high-level AVAssetExportSession API, which provides exceptional ease of use but cedes most granular control over encoding parameters to the system.11 Alternatively, to gain precise control over bitrate, frame rate, and other compression settings, one must descend to the much more complex, lower-level
+AVAssetReader and AVAssetWriter APIs.11 This dichotomy between convenience and control is a central theme in native video processing. The third-party libraries discussed later in this report exist largely to fill the gap between these two extremes, offering the power of the low-level APIs with a much simpler interface. Understanding this spectrum is key to selecting the right native tool for the job.
+
+
+The High-Level Approach: AVAssetExportSession
+
+
+AVAssetExportSession is the workhorse for simple and efficient video transcoding on iOS. It provides a straightforward, asynchronous interface for converting an AVAsset from one format to another using a system of predefined presets.14
+
+
+Implementation
+
+
+The process involves initializing an AVAssetExportSession with a source asset and a preset name, specifying an output URL and file type, and then initiating the export. Modern Swift development favors the async/await syntax for its clarity and robustness.
+Here is a comprehensive example demonstrating how to compress a video using a medium-quality preset, which is suitable for aggressive lossy compression aimed at reducing file size for sharing.
+
+
+Swift
+
+
+
+
+import AVFoundation
+import UniformTypeIdentifiers
+
+enum VideoCompressionError: Error {
+   case failedToInitializeExportSession
+   case exportFailed(Error?)
+   case compatibilityCheckFailed
+}
+
+/// Compresses a video using AVAssetExportSession with a specified preset.
+/// - Parameters:
+///   - inputURL: The URL of the video file to compress.
+///   - presetName: The AVAssetExportPreset to use for compression (e.g., AVAssetExportPresetMediumQuality).
+///   - outputFileType: The desired output file type (e.g.,.mp4).
+/// - Returns: The URL of the compressed video file.
+/// - Throws: A VideoCompressionError if the process fails.
+func compressVideoWithPreset(
+   inputURL: URL,
+   presetName: String = AVAssetExportPresetMediumQuality,
+   outputFileType: AVFileType =.mp4
+) async throws -> URL {
+   let asset = AVURLAsset(url: inputURL)
+   let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension(for: UTType.mp4) // Using UTType for modern path extension handling
+
+   // Check for preset compatibility with the asset
+   let isCompatible = await AVAssetExportSession.compatibility(
+       ofExportPreset: presetName,
+       with: asset,
+       outputFileType: outputFileType
+   )
+   
+   guard isCompatible else {
+       print("Preset \(presetName) is not compatible with the asset or output file type.")
+       throw VideoCompressionError.compatibilityCheckFailed
+   }
+
+   // Initialize the export session
+   guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
+       throw VideoCompressionError.failedToInitializeExportSession
+   }
+
+   // Configure the export session
+   exportSession.outputURL = outputURL
+   exportSession.outputFileType = outputFileType
+   exportSession.shouldOptimizeForNetworkUse = true // Important for streaming
+
+   // Perform the export asynchronously
+   await exportSession.export()
+
+   // Check the result
+   switch exportSession.status {
+   case.completed:
+       print("Video export completed successfully. Output at: \(outputURL)")
+       return outputURL
+   case.failed:
+       throw VideoCompressionError.exportFailed(exportSession.error)
+   case.cancelled:
+       throw VideoCompressionError.exportFailed(nil) // Or a specific cancellation error
+   default:
+       // Handle other states like.waiting,.exporting,.unknown if necessary
+       // For this example, we treat them as failures for simplicity.
+       throw VideoCompressionError.exportFailed(exportSession.error)
+   }
+}
+
+// --- Example Usage ---
+// let videoURL = // URL to a video from PHPickerViewController or elsewhere
+//
+// Task {
+//     do {
+//         let originalData = try Data(contentsOf: videoURL)
+//         print("Original file size: \(Double(originalData.count) / 1_048_576.0) MB")
+//
+//         let compressedURL = try await compressVideoWithPreset(inputURL: videoURL)
+//
+//         let compressedData = try Data(contentsOf: compressedURL)
+//         print("Compressed file size: \(Double(compressedData.count) / 1_048_576.0) MB")
+//
+//         // Clean up the temporary file
+//         try? FileManager.default.removeItem(at: compressedURL)
+//
+//     } catch {
+//         print("Video compression failed: \(error)")
+//     }
+// }
+
+This example uses the modern export() method, which leverages Swift Concurrency.14 Older codebases might use the
+exportAsynchronously(completionHandler:) method, but the async/await approach is preferred for new development.17
+
+
+Strengths and Limitations
+
+
+The primary strength of AVAssetExportSession is its simplicity and tight integration with the operating system, ensuring that exports are hardware-accelerated and power-efficient where possible. However, its major limitation is the lack of fine-grained control. As documented, developers cannot specify precise bitrates or frame rates; these critical parameters are entirely dictated by the chosen presetName.11 For many applications requiring simple, reliable compression, this is sufficient. For those needing custom encoding parameters, a more advanced solution is required.
+
+
+Harnessing Modern Codecs: HEVC (H.265) Exports
+
+
+High-Efficiency Video Coding (HEVC), also known as H.265, is the successor to the ubiquitous H.264/AVC codec. Its main advantage is significantly improved compression efficiency, capable of reducing file sizes by up to 50% compared to H.264 at the same level of visual quality.1 Apple has adopted HEVC as a standard for video capture on modern devices, making it an excellent choice for compression tasks within an app.
+
+
+Using HEVC Presets
+
+
+AVAssetExportSession provides a range of presets for exporting to HEVC. These can be used as direct replacements for the H.264 presets in the previous example.
+Available HEVC presets include 19:
+* AVAssetExportPresetHEVCHighestQuality: Exports at the highest available quality, adapting to the source resolution.
+* AVAssetExportPresetHEVCHighestQualityWithAlpha: Same as above, but preserves the alpha channel (transparency).
+* AVAssetExportPresetHEVC1920x1080: Exports at 1920x1080 resolution.
+* AVAssetExportPresetHEVC3840x2160: Exports at 3840x2160 (4K) resolution.
+* And others with alpha support, such as AVAssetExportPresetHEVC1920x1080WithAlpha.
+To use one, simply pass the desired preset string to the AVAssetExportSession initializer:
+
+
+Swift
+
+
+
+
+//... inside the compression function
+guard let exportSession = AVAssetExportSession(
+   asset: asset,
+   presetName: AVAssetExportPresetHEVCHighestQuality
+) else {
+   //... handle error
+}
+//...
+
+
+
+Device Compatibility
+
+
+A critical consideration when using HEVC is hardware support. While modern iPhones and iPads have hardware encoders for HEVC, older devices do not. Attempting to use a HEVC preset on an unsupported device will result in an error. Therefore, it is essential to programmatically check for compatibility before offering HEVC as an option.
+The most reliable way to do this is to query the available export presets on the device.21
+
+
+Swift
+
+
+
+
+/// Checks if the current device has hardware support for HEVC encoding via AVFoundation.
+/// - Returns: A Boolean value indicating HEVC support.
+func supportsHEVCEncoding() -> Bool {
+   return AVAssetExportSession.allExportPresets().contains(.hevc1920x1080)
+}
+
+// A more robust check could also query VideoToolbox directly for more granular info,
+// but checking AVAssetExportSession presets is sufficient for this use case.
+// See [21] for a VideoToolbox example.
+
+By calling this function, an application can dynamically decide whether to use a HEVC preset or fall back to a more universally compatible H.264 preset.
+
+
+Achieving Granular Control: AVAssetReader and AVAssetWriter
+
+
+When the predefined presets of AVAssetExportSession are too restrictive, developers must turn to the lower-level AVAssetReader and AVAssetWriter classes. This combination provides complete control over the transcoding pipeline, allowing for the specification of custom bitrates, codecs, resolutions, and frame timings.11 This power comes at the cost of significantly increased complexity.
+
+
+Architecture Deep Dive
+
+
+The Reader/Writer pipeline involves several distinct steps 22:
+1. Create AVAssetReader: An AVAssetReader is initialized with the source AVAsset. Its purpose is to read media data from the asset's tracks.
+2. Add AVAssetReaderTrackOutput: For each track to be processed (e.g., video, audio), an AVAssetReaderTrackOutput is created and added to the reader. This object vends the media samples from a specific track.
+3. Create AVAssetWriter: An AVAssetWriter is initialized with an output URL and file type. It is responsible for writing media data into a new container file.
+4. Configure AVAssetWriterInput: For each output track, an AVAssetWriterInput is configured with a dictionary of settings. This is where custom parameters like codec (AVVideoCodecKey), dimensions (AVVideoWidthKey, AVVideoHeightKey), and compression properties are defined.
+5. Start Reading and Writing: The reader and writer are started. The code then enters a loop, requesting CMSampleBuffer objects from the reader's output and appending them to the corresponding writer's input until all data is processed.23
+
+
+Code Example (Lossy Compression with Custom Bitrate)
+
+
+The following example demonstrates how to implement this pipeline to achieve aggressive lossy compression by setting a custom average bitrate. This directly addresses the user's first requirement.
+
+
+Swift
+
+
+
+
+import AVFoundation
+
+enum CustomVideoCompressionError: Error {
+   case readerInitializationFailed(Error?)
+   case writerInitializationFailed(Error?)
+   case trackNotFound
+   case failedToStartSession
+}
+
+/// Compresses a video using AVAssetReader and AVAssetWriter for granular control.
+/// - Parameters:
+///   - inputURL: The URL of the video to compress.
+///   - outputURL: The destination URL for the compressed video.
+///   - videoBitrate: The target average bitrate for the video track in bits per second.
+///   - audioBitrate: The target bitrate for the audio track in bits per second.
+/// - Returns: A Boolean indicating success.
+func compressVideoWithCustomBitrate(
+   inputURL: URL,
+   outputURL: URL,
+   videoBitrate: NSNumber,
+   audioBitrate: NSNumber
+) async -> Bool {
+
+   let asset = AVURLAsset(url: inputURL)
+
+   do {
+       // 1. Setup Reader
+       let assetReader = try AVAssetReader(asset: asset)
+       guard let videoTrack = try await asset.loadTracks(withMediaType:.video).first,
+             let audioTrack = try await asset.loadTracks(withMediaType:.audio).first else {
+           throw CustomVideoCompressionError.trackNotFound
+       }
+
+       let videoReaderOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings:)
+       if assetReader.canAdd(videoReaderOutput) {
+           assetReader.add(videoReaderOutput)
+       }
+
+       let audioReaderOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil) // Passthrough audio settings
+       if assetReader.canAdd(audioReaderOutput) {
+           assetReader.add(audioReaderOutput)
+       }
+
+       // 2. Setup Writer
+       let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType:.mp4)
+
+       // 3. Configure Writer Inputs
+       // Video Input
+       let videoOutputSettings: =
+       let videoWriterInput = AVAssetWriterInput(mediaType:.video, outputSettings: videoOutputSettings)
+       videoWriterInput.transform = try await videoTrack.load(.preferredTransform)
+       videoWriterInput.expectsMediaDataInRealTime = false
+       if assetWriter.canAdd(videoWriterInput) {
+           assetWriter.add(videoWriterInput)
+       }
+
+       // Audio Input
+       let audioOutputSettings: =
+       let audioWriterInput = AVAssetWriterInput(mediaType:.audio, outputSettings: audioOutputSettings)
+       audioWriterInput.expectsMediaDataInRealTime = false
+       if assetWriter.canAdd(audioWriterInput) {
+           assetWriter.add(audioWriterInput)
+       }
+       
+       // 4. Start Transcoding
+       guard assetReader.startReading(), assetWriter.startWriting() else {
+           throw CustomVideoCompressionError.failedToStartSession
+       }
+       assetWriter.startSession(atSourceTime:.zero)
+
+       // 5. Process Samples in parallel using dispatch groups
+       let dispatchGroup = DispatchGroup()
+       
+       dispatchGroup.enter()
+       videoWriterInput.requestMediaDataWhenReady(on:.global(qos:.userInitiated)) {
+           while videoWriterInput.isReadyForMoreMediaData {
+               if let sampleBuffer = videoReaderOutput.copyNextSampleBuffer() {
+                   videoWriterInput.append(sampleBuffer)
+               } else {
+                   videoWriterInput.markAsFinished()
+                   dispatchGroup.leave()
+                   break
+               }
+           }
+       }
+
+       dispatchGroup.enter()
+       audioWriterInput.requestMediaDataWhenReady(on:.global(qos:.userInitiated)) {
+           while audioWriterInput.isReadyForMoreMediaData {
+               if let sampleBuffer = audioReaderOutput.copyNextSampleBuffer() {
+                   audioWriterInput.append(sampleBuffer)
+               } else {
+                   audioWriterInput.markAsFinished()
+                   dispatchGroup.leave()
+                   break
+               }
+           }
+       }
+
+       dispatchGroup.wait() // Wait for both inputs to finish
+
+       await assetWriter.finishWriting()
+       
+       if assetWriter.status ==.completed {
+           return true
+       } else {
+           print("Writer failed with error: \(assetWriter.error?.localizedDescription?? "Unknown")")
+           return false
+       }
+
+   } catch {
+       print("Custom video compression failed: \(error)")
+       return false
+   }
+}
+
+
+
+Targeted Frame Rate Reduction (User Requirement #5)
+
+
+The user's fifth requirement is to reduce the frame rate of a video without reducing the quality of the remaining frames. As established, high-level APIs like AVAssetExportSession do not permit this level of control, as the preset dictates the frame rate.11 This task necessitates the
+AVAssetReader/Writer pipeline.
+The core challenge is that simply dropping frames during the read/write loop is not sufficient. The presentation timestamps (CMTime) of the remaining frames must be adjusted to form a new, consistent timeline. A failure to do so results in a video that plays back at the wrong speed or has jerky motion.
+
+
+The Reader/Writer Solution
+
+
+The solution involves modifying the sample processing loop. Instead of directly appending the sample buffers from the reader to the writer, one must create new sample buffers with adjusted timing information. The key function for this is CMSampleBufferCreateCopyWithNewTiming.25
+The strategy is as follows:
+1. Establish a target frame duration (e.g., for 30 fps, the duration is CMTime(value: 1, timescale: 30)).
+2. Initialize a counter for the output frame number.
+3. In the processing loop, for each sample buffer read from the source, calculate its new presentation timestamp based on the target frame duration and the output frame counter.
+4. Use CMSampleBufferCreateCopyWithNewTiming to create a copy of the original sample buffer, but with the new, calculated timestamp.
+5. Append this new, retimed sample buffer to the writer.
+6. Increment the output frame counter.
+This process effectively re-times the video stream to a new, constant frame rate.
+Regarding the "without reducing quality" constraint, it's important to clarify that dropping frames is an inherent loss of temporal information. The video will be less smooth. However, the spatial quality (the clarity and detail) of the frames that remain can be preserved by setting a high bitrate in the AVAssetWriterInput's settings, just as in the previous example. The file size will decrease because there are fewer frames to encode, achieving the user's goal.
+
+
+The Pursuit of "Lossless" Compression (User Requirement #2)
+
+
+The user's second requirement—to make video files smaller without quality degradation—is nuanced. As previously discussed, true mathematical lossless video compression is generally impractical for mobile applications due to the massive resulting file sizes and the already-lossy nature of camera-captured video.6 The user's intent is more likely to achieve one of two practical goals: either pass the video through without any re-encoding, or re-encode it in a visually lossless manner.
+
+
+Passthrough Export
+
+
+When the goal is simply to change the container format (e.g., .mov to .mp4) or perform a simple trim without altering the underlying video and audio streams, re-encoding is wasteful and introduces unnecessary quality loss. For this scenario, AVAssetExportSession provides the perfect tool: AVAssetExportPresetPassthrough.26
+Using this preset instructs the export session to remux the existing data streams into the new container without transcoding them. This is extremely fast and preserves the original quality perfectly.
+
+
+Swift
+
+
+
+
+// Use the same `compressVideoWithPreset` function from before, but with a different preset
+// let compressedURL = try await compressVideoWithPreset(
+//     inputURL: videoURL,
+//     presetName: AVAssetExportPresetPassthrough,
+//     outputFileType:.mp4
+// )
+
+
+
+Visually Lossless Re-encoding
+
+
+When re-encoding is unavoidable—for instance, when resizing, applying filters, or compositing multiple videos—the goal shifts to making the output visually indistinguishable from the source. This is achieved using the AVAssetReader/Writer pipeline with settings optimized for quality:
+* Codec: Use a modern, efficient codec like HEVC (AVVideoCodecType.hevc) if the target devices support it.
+* Bitrate: Set a very high AVVideoAverageBitRateKey. A good starting point is to match or slightly exceed the bitrate of the source video. The source bitrate can be estimated from the AVAssetTrack's estimatedDataRate property.
+By using a high-quality codec and providing an ample bitrate, the encoder is not forced to discard significant visual information, resulting in a visually lossless transcode. While technically a lossy-to-lossy operation, it effectively meets the user's goal of preserving perceived quality.
+
+
+Section 1.2: Extending Capabilities with Third-Party Video Libraries
+
+
+While AVFoundation is powerful, its steep learning curve for advanced tasks and the significant gap between the simplicity of AVAssetExportSession and the complexity of AVAssetReader/Writer have created an opportunity for third-party libraries. These tools can simplify complex workflows or provide capabilities that are simply not available in the native frameworks.
+A particularly powerful but complex option is ffmpeg-kit, a wrapper around the formidable FFmpeg command-line tool. It offers unparalleled control over every facet of media manipulation.2 However,
+ffmpeg-kit is fundamentally a C library with an Objective-C API, which can introduce integration friction into a modern Swift project.28 Furthermore, the original, widely-used
+ffmpeg-kit repository by arthenica has been officially retired, shifting the burden of maintenance to the community and introducing a potential long-term risk for projects that depend on it.29 This makes
+ffmpeg-kit the "nuclear option"—it should be reserved for scenarios where its immense power is absolutely necessary and cannot be replicated with native APIs or simpler Swift-native wrappers.
+
+
+Modern AVAssetExportSession Alternatives
+
+
+To bridge the gap in the native API spectrum, several libraries have emerged that provide a simple, AVAssetExportSession-like interface while internally managing a complex AVAssetReader/Writer pipeline. These libraries offer the best of both worlds: ease of use and granular control.
+SJSAssetExportSession is a modern, Swift-native example that is "ready for the world of strict concurrency".30 It provides a clean, builder-style API for configuring custom exports. Another similar library is
+VIExportSession, which also offers a drop-in replacement with customizable settings.31
+
+
+Code Example (SJSAssetExportSession)
+
+
+The following example demonstrates how simple it is to perform a custom compression task using SJSAssetExportSession. It achieves the same result as the verbose AVAssetReader/Writer example but with a fraction of the code.
+
+
+Swift
+
+
+
+
+// First, add SJSAssetExportSession to your project via Swift Package Manager:
+// https://github.com/samsonjs/SJSAssetExportSession.git
+
+import SJSAssetExportSession
+import AVFoundation
+
+/// Compresses a video with custom settings using SJSAssetExportSession.
+/// - Parameters:
+///   - inputURL: The URL of the video to compress.
+///   - outputURL: The destination URL for the compressed video.
+/// - Throws: An error if the export fails.
+func compressVideoWithSJS(inputURL: URL, outputURL: URL) async throws {
+   let sourceAsset = AVURLAsset(url: inputURL)
+   let exporter = SJSAssetExportSession.ExportSession()
+
+   // Monitor progress (optional)
+   Task {
+       for await progress in exporter.progressStream {
+           print("Export progress: \(progress)")
+       }
+   }
+
+   // Configure and execute the export with a simple, builder-style API
+   try await exporter.export(
+       asset: sourceAsset,
+       optimizeForNetworkUse: true,
+       video:.codec(.h264, width: 1280, height: 720) // Specify codec and resolution
+              .fps(24)                                // Specify frame rate
+              .bitrate(1_000_000),                    // Specify bitrate (1 Mbps)
+       audio:.format(.aac)                           // Specify audio format
+              .channels(2)
+              .sampleRate(44_100),
+       to: outputURL,
+       as:.mp4
+   )
+   
+   print("SJSAssetExportSession export completed.")
+}
+
+This code is significantly more declarative and less error-prone than managing the AVAssetReader/Writer pipeline manually, making libraries like SJSAssetExportSession an excellent choice for most custom video compression tasks in a Swift project.30
+
+
+The Ultimate Tool: Integrating and Using ffmpeg-kit
+
+
+When absolute control is required, or when a specific filter or codec not available in AVFoundation is needed, ffmpeg-kit is the definitive tool. It exposes the full power of the FFmpeg command line to an iOS app.
+
+
+Integration Guide
+
+
+Integrating ffmpeg-kit requires careful attention to dependencies and project configuration.
+* Swift Package Manager (SPM): This is the recommended modern approach. Since the original repository is retired, developers should use a community-maintained fork. tylerjonesio/ffmpeg-kit-spm is one such package that bundles the library for easy integration.32
+* CocoaPods: For projects using CocoaPods, the process has changed due to the retirement of the original pod. The community has provided replacements. A crucial, up-to-date piece of information is that developers can point their Podfile to a community-maintained .podspec file, such as the one provided by luthviar/ffmpeg-kit-ios-full, to continue using ffmpeg-kit.29
+The installation process typically involves adding the dependency, and then linking required system libraries such as libbz2, libc++, libiconv, libz, VideoToolbox, and Accelerate.33
+
+
+Executing Commands in Swift
+
+
+Once integrated, ffmpeg-kit is used by constructing command-line strings and executing them. The asynchronous API with callbacks is the most robust way to handle long-running compression tasks without blocking the main thread.
+The following is a reusable template for executing an ffmpeg-kit command in Swift.
+
+
+Swift
+
+
+
+
+import ffmpegkit
+
+enum FFmpegError: Error {
+   case commandFailed(returnCode: ReturnCode, logs: String)
+   case sessionInvalid
+}
+
+/// Executes an FFmpeg command asynchronously.
+/// - Parameter command: The FFmpeg command string to execute.
+/// - Throws: An FFmpegError if the command fails.
+func runFFmpegCommand(_ command: String) async throws {
+   print("Executing FFmpeg command: \(command)")
+
+   return try await withCheckedThrowingContinuation { continuation in
+       FFmpegKit.executeAsync(command) { session in
+           guard let session = session else {
+               continuation.resume(throwing: FFmpegError.sessionInvalid)
+               return
+           }
+           
+           let returnCode = session.getReturnCode()
+           
+           if ReturnCode.isSuccess(returnCode) {
+               print("FFmpeg command completed successfully.")
+               continuation.resume()
+           } else if ReturnCode.isCancel(returnCode) {
+               print("FFmpeg command was cancelled.")
+               // Decide whether to throw or handle cancellation gracefully
+               continuation.resume()
+           } else {
+               print("FFmpeg command failed.")
+               let logs = session.getOutput()?? "No output logs."
+               continuation.resume(throwing: FFmpegError.commandFailed(returnCode: returnCode!, logs: logs))
+           }
+       } withLogCallback: { log in
+           if let message = log?.getMessage() {
+               print("FFmpeg Log: \(message)")
+           }
+       } withStatisticsCallback: { statistics in
+           // This callback can be used to update a progress UI
+           if let stats = statistics {
+               // e.g., print("Progress: \(stats.getTime())")
+           }
+       }
+   }
+}
+
+This async/await wrapper around the callback-based API provides a clean, modern interface for running FFmpeg commands within a Swift Concurrency context.34
+
+
+Practical ffmpeg-kit Recipes for Compression
+
+
+With the execution wrapper in place, implementing the user's requirements becomes a matter of crafting the correct command strings.
+
+
+Lossy Compression (Requirement #1)
+
+
+For high-quality, efficient lossy compression, the Constant Rate Factor (-crf) method is superior to simply targeting a bitrate. CRF adjusts the bitrate on the fly to maintain a consistent level of visual quality throughout the video. A lower CRF value results in higher quality and a larger file, while a higher value results in lower quality and a smaller file. A sane range for H.264 is typically 18 (visually lossless) to 28 (highly compressed).2
+For iOS, it is highly recommended to use the hardware-accelerated h264_videotoolbox encoder when possible.37
+Command:
+
+
+Swift
+
+
+
+
+// let inputPath = "path/to/input.mp4"
+// let outputPath = "path/to/output.mp4"
+// let crfValue = 28 // Aggressive compression
+
+// Note: h264_videotoolbox does not support CRF. It uses -b:v for bitrate.
+// We will use libx264 for CRF control, which is software-based.
+// For hardware acceleration with a target quality, one might experiment with bitrate.
+
+// Software encoding with CRF for quality control
+let commandCRF = "-i \"\(inputPath)\" -c:v libx264 -preset medium -crf \(crfValue) -c:a aac -b:a 128k \"\(outputPath)\""
+
+// Hardware encoding with target bitrate for speed
+let commandHardware = "-i \"\(inputPath)\" -c:v h264_videotoolbox -b:v 1M -c:a aac -b:a 128k \"\(outputPath)\""
+
+// try await runFFmpegCommand(commandCRF)
+
+
+
+Frame Rate Reduction (Requirement #5)
+
+
+The most direct and reliable method for changing a video's frame rate in FFmpeg is the fps video filter (-vf).38 This filter will drop or duplicate frames as needed to precisely match the target rate.
+Command:
+
+
+Swift
+
+
+
+
+// let inputPath = "path/to/input.mp4"
+// let outputPath = "path/to/output_30fps.mp4"
+// let targetFPS = 30
+
+let command = "-i \"\(inputPath)\" -vf fps=\(targetFPS) -c:a copy \"\(outputPath)\""
+// -c:a copy will stream-copy the audio without re-encoding, which is faster.
+
+// try await runFFmpegCommand(command)
+
+This command provides a simple and effective solution to the user's fifth requirement, offering more predictability than the native AVAssetReader/Writer timing manipulation.
+________________
+
+
+Part 2: Optimizing Images for iOS Applications
+
+
+This part addresses the user's requirements for lossy and lossless image compression. A key principle that underpins all effective image optimization on mobile is that compression is a two-stage process. A naive approach might focus solely on the final encoding quality (e.g., the JPEG compression slider). However, for large images captured by modern device cameras, the most substantial reduction in file size and memory footprint comes from an initial, intelligent resizing step.40 An optimization strategy that ignores resizing will inevitably produce suboptimal results, regardless of the final compression settings. Therefore, the guidance provided here is structured around this critical pipeline:
+Resize first, then compress.
+
+
+Section 2.1: Leveraging Native Image Compression Frameworks
+
+
+Apple provides a rich set of frameworks for image handling, each with different strengths. UIKit, Core Graphics, Image I/O, Core Image, and the low-level Accelerate framework all offer tools for resizing and compression.40
+
+
+The UIKit Approach: Simple and Effective
+
+
+For most common use cases, UIKit provides the most accessible APIs for image compression. The UIImage class has methods to directly get JPEG and PNG data representations.
+
+
+Fundamentals
+
+
+* Lossy Compression: The jpegData(compressionQuality:) method returns a Data object for the image in JPEG format. The compressionQuality parameter is a CGFloat from 0.0 (maximum compression, lowest quality) to 1.0 (least compression, highest quality).41
+* Lossless Compression: The pngData() method returns a Data object for the image in PNG format, which uses lossless compression.
+
+
+Implementation
+
+
+A robust implementation combines resizing and compression into a single, reusable UIImage extension. The most modern and performant way to resize an image in UIKit is with UIGraphicsImageRenderer.40
+
+
+Swift
+
+
+
+
+import UIKit
+
+extension UIImage {
+   
+   /// Resizes and compresses an image to achieve a target file size.
+   /// - Parameters:
+   ///   - maxResolution: The maximum dimension (width or height) for the resized image.
+   ///   - compression: The initial JPEG compression quality (0.0 to 1.0).
+   ///   - maxFileSize: The target maximum file size in bytes.
+   /// - Returns: The compressed image data, or nil if compression fails.
+   func compress(
+       maxResolution: CGFloat = 1920,
+       compression: CGFloat = 0.8,
+       maxFileSize: Int = 1 * 1024 * 1024 // 1 MB
+   ) -> Data? {
+       // 1. Resize the image first
+       let resizedImage = self.resized(toMax: maxResolution)
+       
+       // 2. Iteratively compress to meet file size target
+       var currentCompression = compression
+       var imageData = resizedImage.jpegData(compressionQuality: currentCompression)
+       
+       // This iterative loop is expensive for very large images.
+       // It's a trade-off for precise file size control.
+       while let data = imageData, data.count > maxFileSize && currentCompression > 0.1 {
+           currentCompression -= 0.1
+           imageData = resizedImage.jpegData(compressionQuality: currentCompression)
+       }
+       
+       return imageData
+   }
+   
+   /// Resizes the image to a maximum dimension while maintaining aspect ratio.
+   /// - Parameter maxDimension: The maximum value for either width or height.
+   /// - Returns: A new, resized UIImage.
+   private func resized(toMax maxDimension: CGFloat) -> UIImage {
+       guard max(size.width, size.height) > maxDimension else { return self }
+       
+       let scale: CGFloat
+       if size.width > size.height {
+           scale = maxDimension / size.width
+       } else {
+           scale = maxDimension / size.height
+       }
+       
+       let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+       
+       let renderer = UIGraphicsImageRenderer(size: newSize)
+       return renderer.image { _ in
+           self.draw(in: CGRect(origin:.zero, size: newSize))
+       }
+   }
+}
+
+This approach, while effective, demonstrates the performance trade-off mentioned in 60 and.61 The
+while loop that repeatedly calls jpegData can be slow. For applications where speed is critical and an exact file size is not, a single compression pass is preferable.
+
+
+High-Efficiency Image Formats: Compressing to HEIC
+
+
+Just as HEVC is the modern standard for video, the High-Efficiency Image File Format (HEIF) is its counterpart for still images. When a HEIF container stores an image compressed with the HEVC codec, the result is a HEIC file.44 HEIC offers a much better quality-to-size ratio than JPEG and is Apple's default format for photos.45
+
+
+Implementation Guide
+
+
+The method for converting a UIImage to HEIC data depends on the targeted iOS version.
+1. Modern Approach (iOS 17+)
+Apple significantly simplified this process in iOS 17 by adding a heicData() method directly to UIImage.46
+
+
+Swift
+
+
+
+
+// On iOS 17 and later
+// let image: UIImage = // your source image
+// let heicData = image.heicData() // Lossless by default
+// let compressedHeicData = image.heicData(compressionQuality: 0.75)
+
+2. Legacy Approach (iOS < 17)
+For older iOS versions, the conversion must be done manually using the Image I/O framework. This involves creating a CGImageDestination and specifying the Uniform Type Identifier (UTI) for HEIC, which is "public.heic".46
+
+
+Swift
+
+
+
+
+import ImageIO
+import MobileCoreServices // For kUTTypeHEIC if not using "public.heic"
+
+extension UIImage {
+   
+   enum HEICError: Error {
+       case heicNotSupported
+       case cgImageMissing
+       case couldNotCreateDestination
+       case couldNotFinalize
+   }
+   
+   /// Converts a UIImage to HEIC data.
+   /// - Parameter compressionQuality: The quality, from 0.0 to 1.0.
+   /// - Returns: The HEIC image data.
+   func toHEICData(compressionQuality: CGFloat = 1.0) throws -> Data {
+       let heicUTI = "public.heic" as CFString
+       
+       // Check for HEIC support on the device
+       guard (CGImageDestinationCopyTypeIdentifiers() as!).contains(heicUTI as String) else {
+           throw HEICError.heicNotSupported
+       }
+       
+       guard let cgImage = self.cgImage else {
+           throw HEICError.cgImageMissing
+       }
+       
+       let mutableData = CFDataCreateMutable(nil, 0)!
+       guard let destination = CGImageDestinationCreateWithData(mutableData, heicUTI, 1, nil) else {
+           throw HEICError.couldNotCreateDestination
+       }
+       
+       // Set compression properties
+       let properties = as CFDictionary
+       
+       CGImageDestinationAddImage(destination, cgImage, properties)
+       
+       guard CGImageDestinationFinalize(destination) else {
+           throw HEICError.couldNotFinalize
+       }
+       
+       return mutableData as Data
+   }
+}
+
+This legacy approach is more verbose but provides the necessary functionality for apps supporting older iOS versions.45
+
+
+The Professional's Choice: The Image I/O Framework
+
+
+When an application requires maximum control over the image encoding process, including metadata manipulation and access to advanced properties, the Image I/O framework is the tool of choice. It offers better performance than UIKit for many tasks and exposes a lower-level, more powerful API.40
+
+
+Detailed Workflow
+
+
+The workflow is similar to the legacy HEIC conversion example above. It involves creating a CGImageDestination for a target data buffer, adding a CGImage, and providing a dictionary of properties to control the output. The key for controlling lossy compression quality is kCGImageDestinationLossyCompressionQuality.48
+
+
+Swift
+
+
+
+
+import ImageIO
+import MobileCoreServices
+
+/// Converts a UIImage to JPEG data using the Image I/O framework for maximum control.
+/// - Parameters:
+///   - image: The source UIImage.
+///   - compressionQuality: The desired JPEG quality (0.0 to 1.0).
+/// - Returns: The JPEG data, or nil on failure.
+func convertImageToJPEG_ImageIO(image: UIImage, compressionQuality: CGFloat) -> Data? {
+   guard let cgImage = image.cgImage else { return nil }
+   
+   let mutableData = NSMutableData()
+   let jpegUTI = kUTTypeJPEG as CFString
+   
+   // Create an image destination.
+   guard let destination = CGImageDestinationCreateWithData(mutableData, jpegUTI, 1, nil) else {
+       return nil
+   }
+   
+   // Set the properties for the image, including compression quality.
+   let properties: =
+   
+   // Add the image to the destination with the specified properties.
+   CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+   
+   // Finalize the image. This writes the data to the mutableData buffer.
+   if CGImageDestinationFinalize(destination) {
+       return mutableData as Data
+   } else {
+       return nil
+   }
+}
+
+This method provides a robust foundation for any high-performance image writing task, giving the developer direct access to the powerful capabilities of the Image I/O framework.49
+
+
+Deep Dive: Image Resizing Techniques and Performance
+
+
+As established, resizing is the most impactful step in the image optimization pipeline. iOS offers several technologies for this task, and their performance characteristics differ significantly. A comprehensive analysis highlights the best tool for various scenarios.40
+* UIGraphicsImageRenderer (UIKit): This is the modern, preferred method for most resizing tasks. It provides a simple, block-based API and is highly optimized, offering an excellent balance of ease-of-use and performance.40
+* Core Graphics: This lower-level C-based API can also be used for resizing by drawing an image into a new bitmap context of a different size. Its quality is comparable to UIKit, but UIGraphicsImageRenderer is generally simpler to use correctly.50
+* Core Image: While powerful for filtering and effects, Core Image is surprisingly inefficient for simple scaling operations. Using a CILanczosScaleTransform filter is often slower than UIKit or Core Graphics. Apple's own documentation recommends using Core Graphics or Image I/O for downsampling instead of Core Image.40
+* Accelerate / vImage: For applications that perform a high volume of image resizing in performance-critical contexts, the vImage framework within Accelerate is the ultimate tool. It operates on raw image buffers and leverages the CPU's vector processing units (SIMD) for maximum speed. However, this performance comes with significant implementation overhead, as it requires manual memory management and a deeper understanding of image buffer formats.40 For most apps, the benefits do not justify the complexity.
+
+
+Section 2.2: Specialized Third-Party Image Compression Libraries
+
+
+While Apple's native frameworks are highly capable, the open-source community offers specialized libraries that can provide superior compression or more convenient APIs for specific formats.
+
+
+Pure-Swift Powerhouses: swift-png and swift-jpeg
+
+
+These two libraries, from the same author, are notable for being written in pure Swift, with no dependency on Foundation or C libraries. This makes them lightweight, cross-platform, and easy to integrate.53
+
+
+swift-png
+
+
+For lossless PNG compression, swift-png is a compelling alternative to the native image.pngData(). It features a more advanced DEFLATE implementation that can often produce smaller files than the system's default encoder. It also boasts "superior compression" through minimum cost path optimization, offering more compression levels than the standard libpng C library.54 Another key feature is its first-class support for decoding and encoding iPhone-optimized PNGs, a format that can cause issues with other libraries.56
+Example Usage (Encoding):
+
+
+Swift
+
+
+
+
+// Add swift-png via SPM: https://github.com/tayloraswift/swift-png.git
+import PNG
+
+/// Encodes an image to PNG data using the swift-png library.
+/// - Parameters:
+///   - pixels: An array of RGBA pixel data.
+///   - size: A tuple representing the image width and height.
+///   - compressionLevel: The desired compression level (0-9).
+/// - Returns: The PNG data.
+func encodePNG(pixels:, size: (x: Int, y: Int), compressionLevel: Int) throws -> [UInt8] {
+   let image = PNG.Image(
+       packing: pixels,
+       size: size,
+       layout:.init(format:.rgba8(palette:, fill: nil))
+   )
+   return try image.compress(level: compressionLevel)
+}
+
+
+
+swift-jpeg
+
+
+For lossy JPEG compression, swift-jpeg offers a level of control that surpasses the simple compressionQuality slider provided by native APIs. It allows developers to directly manipulate the underlying components of the JPEG format, such as quantization tables, providing an expert level of control over the trade-off between file size and quality.57
+Example Usage (Encoding):
+
+
+Swift
+
+
+
+
+// Add swift-jpeg via SPM: https://github.com/tayloraswift/swift-jpeg.git
+import JPEG
+
+/// Encodes an image to JPEG data using the swift-jpeg library.
+/// - Parameters:
+///   - pixels: An array of RGB pixel data.
+///   - size: A tuple representing the image width and height.
+///   - compression: A value from 0.0 (highest quality) to 1.0 (lowest quality).
+/// - Returns: The JPEG data.
+func encodeJPEG(pixels:, size: (x: Int, y: Int), compression: Double) throws -> [UInt8] {
+   let image = JPEG.Data.Rectangular<JPEG.Common>.pack(
+       size: size,
+       //... layout and metadata configuration...
+       pixels: pixels
+   )
+   
+   // Define quantization tables based on the compression level
+   let quanta: = [
+       JPEG.CompressionLevel.luminance(compression).quanta,
+       JPEG.CompressionLevel.chrominance(compression).quanta
+   ]
+   
+   return try image.compress(quanta: quanta)
+}
+
+
+
+Use-Case Specific Libraries: WXImageCompress
+
+
+The broader ecosystem contains many other libraries, often tailored to a very specific need. WXImageCompress, for example, is designed explicitly to "compress an image very close to WeChat picture compression strategy".58 Another older, Objective-C library is
+UIImage-ImageCompress.59 While these tools can be valuable, they are generally less flexible than the pure-Swift libraries or native frameworks and should be chosen when their specific behavior is exactly what is required.
+________________
+
+
+Part 3: Synthesis and Final Recommendations
+
+
+The preceding analysis has detailed a wide array of tools and techniques for media compression on iOS. The "best" method is not a single answer but rather a decision based on the specific requirements of a feature, balancing development complexity against the need for performance and granular control. This final section synthesizes this information into a practical decision-making framework and provides definitive, expert-recommended implementations for each of the user's original requests.
+
+
+Section 3.1: Decision Framework: Choosing the Right Tool for the Job
+
+
+To navigate the complex landscape of media compression options, a structured comparison is invaluable. The choice of technology should be a deliberate one, weighing the trade-offs involved. For instance, a developer building a simple social media feature where users share short video clips might prioritize ease of implementation and reliability, making AVAssetExportSession the ideal choice. Conversely, a developer creating a professional video editing application would require the absolute control over codecs and bitrates afforded by AVAssetReader/Writer or the even greater flexibility of ffmpeg-kit. The following table distills the analysis of this report into a scannable decision matrix, allowing a developer to quickly map their project's needs to the most appropriate tool.
+Technique
+	Ease of Use
+	Performance
+	Control
+	Compression Efficiency
+	Licensing
+	Best Use Case
+	Video
+	
+
+	
+
+	
+
+	
+
+	
+
+	
+
+	AVAssetExportSession
+	High
+	Excellent (HW)
+	Presets Only
+	Good
+	Native
+	Quick, reliable transcoding for sharing; simple format conversion.
+	AVAssetReader/Writer
+	Low
+	Excellent (HW)
+	Granular
+	Excellent
+	Native
+	Custom editing pipelines; applying filters; precise bitrate/resolution control.
+	SJSAssetExportSession
+	High
+	Excellent (HW)
+	Granular
+	Excellent
+	MIT
+	A modern, Swift-friendly replacement for AVAssetReader/Writer pipelines.
+	ffmpeg-kit
+	Low
+	Good (SW/HW)
+	Absolute
+	State-of-the-Art
+	LGPL/GPL
+	When specific FFmpeg filters/codecs are needed; ultimate flexibility.
+	Image
+	
+
+	
+
+	
+
+	
+
+	
+
+	
+
+	UIImage.jpegData
+	High
+	Good
+	Quality Slider
+	Good
+	Native
+	The simplest method for basic JPEG compression.
+	Image I/O
+	Medium
+	Excellent
+	Granular
+	Excellent
+	Native
+	High-performance encoding; metadata manipulation; thumbnail generation.
+	UIImage.heicData
+	High
+	Excellent (HW)
+	Quality Slider
+	Excellent
+	Native
+	Modern, efficient compression for iOS 17+ targets.
+	swift-png
+	Medium
+	Good (SW)
+	State-of-the-Art
+	State-of-the-Art
+	Apache 2.0
+	Achieving the smallest possible lossless PNG files.
+	swift-jpeg
+	Medium
+	Good (SW)
+	Absolute
+	Excellent
+	Apache 2.0
+	Expert-level control over JPEG encoding parameters (e.g., quantization).
+	(HW) = Hardware-accelerated, (SW) = Software-based
+
+
+Section 3.2: Recommended Implementations
+
+
+Based on the comprehensive analysis and the decision framework above, the following are the expert-recommended solutions for each of the user's five requirements. These selections prioritize the best balance of power, efficiency, and implementation clarity for each specific task.
+1. Video - Aggressive Lossy Compression
+* Recommendation: ffmpeg-kit with a high -crf value.
+* Rationale: While AVAssetExportSession with AVAssetExportPresetLowQuality is simple, ffmpeg-kit's Constant Rate Factor (-crf) provides superior control over the quality-to-size trade-off, allowing for aggressive compression while maintaining a baseline level of perceptual quality. A value around 28 is a good starting point for significant size reduction.
+* Implementation:
+Swift
+import ffmpegkit
+
+func compressVideoAggressively(inputPath: String, outputPath: String) async throws {
+   // Using libx264 for CRF control. -preset veryfast speeds up encoding.
+   let command = "-i \"\(inputPath)\" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k \"\(outputPath)\""
+   try await runFFmpegCommand(command) // Assumes runFFmpegCommand wrapper from Part 1.2
+}
+
+2. Video - Quality-Preserving "Lossless" Compression
+   * Recommendation: AVAssetExportSession with AVAssetExportPresetPassthrough or AVAssetReader/Writer for visually lossless re-encoding.
+   * Rationale: True lossless is impractical. If no change to the encoded stream is needed (e.g., just changing the container), AVAssetExportPresetPassthrough is the perfect, zero-loss solution. If re-encoding is required (e.g., resizing), a visually lossless approach using AVAssetReader/Writer with a high-quality codec (HEVC) and a high bitrate is the correct strategy.
+   * Implementation (Passthrough):
+Swift
+// Use the `compressVideoWithPreset` function from Part 1.1
+// let passthroughURL = try await compressVideoWithPreset(
+//     inputURL: sourceURL,
+//     presetName: AVAssetExportPresetPassthrough,
+//     outputFileType:.mp4
+// )
+
+3. Image - Aggressive Lossy Compression
+      * Recommendation: A UIImage extension combining resizing and a low-quality JPEG export.
+      * Rationale: The most significant file size reduction comes from resizing the image first. UIGraphicsImageRenderer is the best native tool for this. Combining this with a low compressionQuality in jpegData(compressionQuality:) provides a simple and highly effective solution.
+      * Implementation:
+Swift
+extension UIImage {
+   func aggressiveCompress() -> Data? {
+       // Resize to a reasonable web resolution first.
+       let resizedImage = self.resized(toMax: 1280) // Assumes resized(toMax:) from Part 2.1
+       // Use a low quality setting for maximum compression.
+       return resizedImage.jpegData(compressionQuality: 0.1)
+   }
+}
+
+4. Image - Quality-Preserving Lossless Compression
+         * Recommendation: The swift-png third-party library.
+         * Rationale: While UIImage.pngData() provides native lossless compression, swift-png is specifically engineered for superior DEFLATE compression, often resulting in smaller file sizes than the native implementation without any quality loss.55 For the goal of "smallest possible file size without sacrificing quality," it is the optimal choice.
+         * Implementation:
+Swift
+// Assumes an extension on UIImage to get pixel data, and the encodePNG function from Part 2.2
+// let pngData = try encodePNG(
+//     pixels: image.pixelData, // Hypothetical pixel data accessor
+//     size: (Int(image.size.width), Int(image.size.height)),
+//     compressionLevel: 9 // Max compression level in swift-png
+// )
+
+5. Video - Frame Rate Reduction
+            * Recommendation: ffmpeg-kit with the fps video filter.
+            * Rationale: While this is achievable with AVAssetReader/Writer, the process is complex and involves manual timestamp manipulation. ffmpeg-kit provides a direct, declarative, and more reliable solution with the -vf fps= filter.38
+            * Implementation:
+Swift
+import ffmpegkit
+
+func reduceFrameRate(inputPath: String, outputPath: String, targetFPS: Int) async throws {
+   // The fps filter precisely sets the output frame rate.
+   // -c:a copy avoids re-encoding the audio, making the process faster.
+   let command = "-i \"\(inputPath)\" -vf fps=\(targetFPS) -c:a copy \"\(outputPath)\""
+   try await runFFmpegCommand(command) // Assumes runFFmpegCommand wrapper from Part 1.2
+}
+
+
+
+Section 3.3: Final Considerations: UI Responsiveness and File Management
+
+
+Finally, implementing these compression features requires attention to the overall application architecture to ensure a smooth user experience.
+               * Background Processing: All media compression tasks are computationally intensive and can take several seconds or even minutes to complete. Performing these operations on the main thread will freeze the user interface, leading to an unresponsive app. It is imperative that all compression work be dispatched to a background queue. DispatchQueue.global() is a simple way to do this, but for more complex scenarios involving cancellation and dependencies, a dedicated OperationQueue 45 or Swift's structured concurrency (
+Task) are more robust solutions. UI updates, such as displaying a progress indicator or showing the final compressed media, must always be dispatched back to the main queue.
+               * File System Management: The compression processes detailed in this report frequently create temporary files. These files should always be written to the application's temporary directory, accessible via FileManager.default.temporaryDirectory. It is crucial to implement cleanup logic to delete these temporary files after the operation is complete (whether it succeeds or fails) to prevent the app from consuming an excessive amount of the user's storage over time. A defer block within a do-catch statement is an excellent pattern for ensuring this cleanup occurs.
+Works cited
+                  1. Lossless Video Compression: What is it and Why Should I Care? - Archival Works, accessed July 11, 2025, https://www.archivalworks.com/blog/lossless-video-compression
+                  2. How to compress video using FFmpeg — Shotstack, accessed July 11, 2025, https://shotstack.io/learn/compress-video-ffmpeg/
+                  3. Understanding Video Compression, accessed July 11, 2025, https://shrinkit.app/blog/understanding-video-compression
+                  4. How to Compress A Video and Retain Quality (Top 5 Methods) - StreamYard, accessed July 11, 2025, https://streamyard.com/blog/how-to-compress-a-video
+                  5. Lossy vs Lossless Compression: Differences & Advantages - Adobe, accessed July 11, 2025, https://www.adobe.com/uk/creativecloud/photography/discover/lossy-vs-lossless.html
+                  6. Lossless Video Format: 7 Popular Formats and How to Choose | Cloudinary, accessed July 11, 2025, https://cloudinary.com/guides/video-formats/lossless-video-format-7-popular-formats-and-how-to-choose
+                  7. Lossy and Lossless Compression: The Difference - wolfcrow, accessed July 11, 2025, https://wolfcrow.com/the-difference-between-lossy-and-lossless-compression/
+                  8. Popular Video Compression Techniques & Their Impact on Industry Evolution - Brightlink AV, accessed July 11, 2025, https://brightlinkav.com/blogs/news/video-compression-explained-techniques-their-evolution
+                  9. Lossless video compression.. : r/VideoEditing - Reddit, accessed July 11, 2025, https://www.reddit.com/r/VideoEditing/comments/elqqfm/lossless_video_compression/
+                  10. What's the difference between "visually lossless" and real lossless and what does this mean for future encodes?, accessed July 11, 2025, https://video.stackexchange.com/questions/27656/whats-the-difference-between-visually-lossless-and-real-lossless-and-what-doe
+                  11. Exporting a video in iOS to reduce size and ensure maximum client compatibility, accessed July 11, 2025, https://finalizecode.wordpress.com/2014/10/21/exporting-a-video-in-ios-to-reduce-size-and-ensure-maximum-client-compatibility/
+                  12. Cap frame rate or bit rate in AVAssetExportSession? - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/6233535/cap-frame-rate-or-bit-rate-in-avassetexportsession
+                  13. I want to export video with HEVC at 720; but, it doesn't seem to be an option, is there a workaround? : r/swift - Reddit, accessed July 11, 2025, https://www.reddit.com/r/swift/comments/1d2vvwh/i_want_to_export_video_with_hevc_at_720_but_it/
+                  14. AVAssetExportSession | Apple Developer Documentation, accessed July 11, 2025, https://developer.apple.com/documentation/avfoundation/avassetexportsession
+                  15. Using AVFoundation to merge and overlay multiple videos | by Ashwin Pokharel | Medium, accessed July 11, 2025, https://medium.com/@pokharel.ashwin1/using-avfoundation-to-merge-and-overlay-multiple-videos-afd594c7470e
+                  16. Exporting video to alternative formats | Apple Developer Documentation, accessed July 11, 2025, https://developer.apple.com/documentation/avfoundation/exporting-video-to-alternative-formats
+                  17. ios - Swift - Compressing video files - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/40470637/swift-compressing-video-files
+                  18. Video Encoding & Compression: Why Storage & Quality Matter - Harmonic Inc., accessed July 11, 2025, https://www.harmonicinc.com/insights/blog/video-encoding/
+                  19. AVAssetExportPresetHEVCHigh, accessed July 11, 2025, https://developer.apple.com/documentation/avfoundation/avassetexportpresethevchighestqualitywithalpha
+                  20. Export Presets | Apple Developer Documentation, accessed July 11, 2025, https://developer.apple.com/documentation/avfoundation/export-presets
+                  21. swift - Determine if iOS device can support HEVC encoding - Stack ..., accessed July 11, 2025, https://stackoverflow.com/questions/50956097/determine-if-ios-device-can-support-hevc-encoding
+                  22. AVFoundation Programming Guide - Export - Will's Blog, accessed July 11, 2025, https://gewill.org/2016/05/03/AVFoundation-Programming-Guide-Export/
+                  23. AVASSETREADER and AVAssetWriter: i… | Apple Developer Forums, accessed July 11, 2025, https://developer.apple.com/forums/thread/768883
+                  24. How to get frame times and/or step… | Apple Developer Forums, accessed July 11, 2025, https://developer.apple.com/forums/thread/42751
+                  25. ios - How to control video frame rate with AVAssetReader and ..., accessed July 11, 2025, https://stackoverflow.com/questions/16911067/how-to-control-video-frame-rate-with-avassetreader-and-avassetwriter
+                  26. Combine video and audio files as one using AVComposition and AVAssetExportSession, accessed July 11, 2025, https://swiftlyblogging.com/2023/04/08/combine-video-and-audio-files-as-one-using-avcomposition-and-avassetexportsession/
+                  27. FFmpeg Guide - How to Use FFmpeg to Compress Large Video Size - WinXDVD, accessed July 11, 2025, https://www.winxdvd.com/resize-video/compress-video-with-ffmpeg.htm
+                  28. arthenica/ffmpeg-kit: FFmpeg Kit for applications. Supports Android, Flutter, iOS, Linux, macOS, React Native and tvOS. Supersedes MobileFFmpeg, flutter_ffmpeg and react-native-ffmpeg. - GitHub, accessed July 11, 2025, https://github.com/arthenica/ffmpeg-kit
+                  29. Resolved: FFmpegKit Retirement Issue in iOS — A Complete Guide ..., accessed July 11, 2025, https://luthviar.medium.com/%EF%B8%8F-resolved-ffmpegkit-retirement-issue-in-ios-a-complete-guide-with-cocoapods-support-e3caac7192e0
+                  30. samsonjs/SJSAssetExportSession: An alternative to AVAssetExportSession with customizable audio and video settings - GitHub, accessed July 11, 2025, https://github.com/samsonjs/SJSAssetExportSession
+                  31. VideoFlint/VIExportSession: A AVAssetExportSession drop-in replacement with customizable audio&video settings. - GitHub, accessed July 11, 2025, https://github.com/VideoFlint/VIExportSession
+                  32. tylerjonesio/ffmpeg-kit-spm: A Swift Pacakge version of FFmpegKit to allow embedding of FFmpeg in iOS, macOS, and tvOS applications. - GitHub, accessed July 11, 2025, https://github.com/tylerjonesio/ffmpeg-kit-spm
+                  33. Importing iOS Frameworks · arthenica/ffmpeg-kit Wiki - GitHub, accessed July 11, 2025, https://github.com/arthenica/ffmpeg-kit/wiki/Importing-iOS-Frameworks
+                  34. Ffmpeg for use in iOS application coded in Swift - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/72672889/ffmpeg-for-use-in-ios-application-coded-in-swift
+                  35. iOS · arthenica/ffmpeg-kit Wiki - GitHub, accessed July 11, 2025, https://github.com/arthenica/ffmpeg-kit/wiki/iOS
+                  36. FFMPEG Kit iOS Async Call Not Behaving Asynchronously - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/73073953/ffmpeg-kit-ios-async-call-not-behaving-asynchronously
+                  37. iOS Video Compression Using Gigabytes of Memory Causing Crash : r/ffmpeg - Reddit, accessed July 11, 2025, https://www.reddit.com/r/ffmpeg/comments/tqweoh/ios_video_compression_using_gigabytes_of_memory/
+                  38. ChangingFrameRate – FFmpeg, accessed July 11, 2025, https://trac.ffmpeg.org/wiki/ChangingFrameRate
+                  39. Using ffmpeg to change framerate - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/45462731/using-ffmpeg-to-change-framerate
+                  40. Image Resizing Techniques - NSHipster, accessed July 11, 2025, https://nshipster.com/image-resizing/
+                  41. jpegData(compressionQuality:) | Apple Developer Documentation, accessed July 11, 2025, https://developer.apple.com/documentation/uikit/uiimage/jpegdata(compressionquality:)
+                  42. Compress a UIImage - SwiftUI Advanced Handbook - Design+Code, accessed July 11, 2025, https://designcode.io/swiftui-advanced-handbook-compress-a-uiimage/
+                  43. How to reduce file size of png image in Swift by reducing resolution - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/75852076/how-to-reduce-file-size-of-png-image-in-swift-by-reducing-resolution
+                  44. Battle of the Formats: HEIF vs HEIC - Cloudinary, accessed July 11, 2025, https://cloudinary.com/guides/image-formats/heif-vs-heic
+                  45. HEIC Image Compression for iOS - Kodeco, accessed July 11, 2025, https://www.kodeco.com/4726843-heic-image-compression-for-ios
+                  46. ios - How can I convert from UIImage to HEIF / HEIC Data in Swift ..., accessed July 11, 2025, https://stackoverflow.com/questions/61830224/how-can-i-convert-from-uiimage-to-heif-heic-data-in-swift
+                  47. Thinking about Memory: Converting UIImage to Data in Swift - bencoding, accessed July 11, 2025, https://bencoding.com/2017/03/07/thinking-about-memory-converting-uiimage-to-data-in-swift/
+                  48. kCGImageDestinationLossyCom, accessed July 11, 2025, https://developer.apple.com/documentation/imageio/kcgimagedestinationlossycompressionquality
+                  49. Using ImageIO and Swift to convert a UIImage to Data · GitHub, accessed July 11, 2025, https://gist.github.com/benbahrenburg/e529c28de0260733054516e6eee0edf5
+                  50. Resizing Techniques and Image Quality That Every iOS Developer Should Know | by Darshan Sonde | YML Innovation Lab | Medium, accessed July 11, 2025, https://medium.com/ymedialabs-innovation/resizing-techniques-and-image-quality-that-every-ios-developer-should-know-e061f33f7aba
+                  51. help with real-time image processing. : r/swift - Reddit, accessed July 11, 2025, https://www.reddit.com/r/swift/comments/1d1yzx8/help_with_realtime_image_processing/
+                  52. Compressing an image using linear algebra | Apple Developer Documentation, accessed July 11, 2025, https://developer.apple.com/documentation/accelerate/compressing-an-image-using-linear-algebra
+                  53. Introducing Swift JPEG - Related Projects, accessed July 11, 2025, https://forums.swift.org/t/introducing-swift-jpeg/37611
+                  54. tayloraswift/swift-png: decode, inspect, edit, and encode png images in pure swift - GitHub, accessed July 11, 2025, https://github.com/tayloraswift/swift-png
+                  55. swift-png - Swift Package Index, accessed July 11, 2025, https://swiftpackageindex.com/tayloraswift/swift-png
+                  56. Using iPhone-optimized images · swift-png documentation - Swiftinit, accessed July 11, 2025, https://swiftinit.org/docs/swift-png/png/iphoneoptimized
+                  57. tayloraswift/swift-jpeg: decode, inspect, edit, and encode ... - GitHub, accessed July 11, 2025, https://github.com/tayloraswift/swift-jpeg
+                  58. hucool/WXImageCompress: Image size quality ... - GitHub, accessed July 11, 2025, https://github.com/hucool/WXImageCompress
+                  59. IcaliaLabs/UIImage-ImageCompress: An iOS library to ... - GitHub, accessed July 11, 2025, https://github.com/IcaliaLabs/UIImage-ImageCompress
+                  60. How to compress of reduce the size of an image before uploading to Parse as PFFile? (Swift) - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/29726643/how-to-compress-of-reduce-the-size-of-an-image-before-uploading-to-parse-as-pffi
+                  61. Compress image size to below 1 MB in swift iOS - Stack Overflow, accessed July 11, 2025, https://stackoverflow.com/questions/71690594/compress-image-size-to-below-1-mb-in-swift-ios
