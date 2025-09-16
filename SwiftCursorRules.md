@@ -126,3 +126,5 @@ When I give you error(s) I'm experiencing in Xcode and you fix them, you do not 
 ## Avoid 
 - Avoid using Swift, SwiftUI, or UIKit keywords (Task, for example) when creating custom object.
 - Avoid large files. Do not put multiple objects definitions in the same file. Each object should have its own file
+
+Create and use reusable components when possible. Keep a document in the project to reference that contains a catalog of the reusable components.
