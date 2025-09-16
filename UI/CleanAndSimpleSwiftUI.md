@@ -360,7 +360,7 @@ struct ResolutionSettingsSheet: View {
     }
 }
 
-// UPDATED: More creative stepper control
+// More creative stepper control
 struct CompressionPassesSheet: View {
     @Binding var compressionPasses: Int
     @Environment(\.dismiss) var dismiss
