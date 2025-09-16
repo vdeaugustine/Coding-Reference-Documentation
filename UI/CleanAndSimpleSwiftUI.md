@@ -649,3 +649,90 @@ struct StatCell1: View {
 
 ```
 
+==== EXAMPLE 3 ==== 
+The following component is a good example what a simple, but crisp and easy-on-the-eyes badge/banner that conveys specific information to he user with a nice slightly-transparent background. This design choice is nice for UI because it highlights important information to the user but is subtle and elegant. It's also layered nicely with an icon for visual appeal, and then a heading and subheading. This design approach is used frequently in well-designed apps and even Apple native apps.
+
+
+```swift
+private struct TintedChip: View {
+    var icon: String
+    var title: String
+    var subtitle: String? = nil
+
+    var body: some View {
+        HStack(spacing: MintUI.Space.s3) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(MintUI.Colors.mintDeep)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(MintUI.Colors.textStrong)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13))
+                        .foregroundColor(MintUI.Colors.textMuted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, MintUI.Space.s5)
+        .padding(.vertical, MintUI.Space.s4)
+        .frame(height: 72)
+        .background(MintUI.Gradients.mintChip)
+        .cornerRadius(20)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(MintUI.Colors.line, lineWidth: 1)
+        )
+    }
+}
+
+private enum MintUI {
+    enum Colors {
+        static let bg = Color(hex: "#F7F9F8")
+        static let surface = Color.white
+        static let surfaceTintMintA = Color(hex: "#ECF6F5")
+        static let surfaceTintMintB = Color(hex: "#E6F0EE")
+
+        static let textStrong = Color(hex: "#0B0B0B")
+        static let text = Color(hex: "#1A1A1A")
+        static let textMuted = Color(hex: "#636260")
+        static let textSubtle = Color(hex: "#A2A1A1")
+
+        static let line = Color.black.opacity(0.06)
+        static let shadowSm = Color.black.opacity(0.06)
+
+        static let mint = Color(hex: "#20A993")
+        static let mintDeep = Color(hex: "#15443C")
+        static let amber = Color(hex: "#F59E0B")
+        static let goldSoft = Color(hex: "#E7D0A8")
+        static let cta = Color(hex: "#0B0B0B")
+    }
+
+    enum Radii {
+        static let card: CGFloat = 22
+        static let chip: CGFloat = 14
+        static let button: CGFloat = 16
+    }
+
+    enum Space {
+        static let s1: CGFloat = 4
+        static let s2: CGFloat = 8
+        static let s3: CGFloat = 12
+        static let s4: CGFloat = 16
+        static let s5: CGFloat = 20
+        static let s6: CGFloat = 24
+        static let s7: CGFloat = 32
+        static let s8: CGFloat = 40
+    }
+
+    enum Gradients {
+        static let mintChip = LinearGradient(
+            colors: [Colors.surfaceTintMintA, Colors.surfaceTintMintB],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+```
