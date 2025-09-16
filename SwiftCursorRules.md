@@ -9,6 +9,7 @@ All business logic should be moved out of views and into dedicated, encapsulated
 1. Use computed properties with `@ViewBuilder` for view components
 2. Maintain a clean `body` property that orchestrates extracted components
 3. Name components clearly based on their content or function
+4. Prefer computed properties for Views over functions (unless parameters are needed)
 
 ```swift
 struct ExampleView: View {
@@ -120,3 +121,7 @@ When using Swift Testing, if we are writing a test that contains a block that sh
 If we are working in a Swift or Xcode project, and you are going to add a new file, make sure you consider what targets and schemes will need to be included for that file. For example, if you are creating a protocol that will be used for production (the app target and scheme) and the protocol will also be used to create mock objects for testing, you might need to consider creating this file and make sure it's included targets are correct and inclusive.
 
 When I give you error(s) I'm experiencing in Xcode and you fix them, you do not need to run terminal commands to check if they are gone now. Simply implement the fix and I will check if its good to go.
+
+
+## Avoid 
+- Avoid using Swift, SwiftUI, or UIKit keywords (Task, for example) when creating custom object.
