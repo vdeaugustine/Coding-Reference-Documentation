@@ -49,3 +49,6 @@ private var aboutSection: some View { ... }
 
 **Exceptions:**
 This rule can be relaxed for very simple views (e.g. 1-2 short lines) where nesting does not harm readability.
+
+
+### Every view should successfully run with a #Preview that is able to show the view properly with dummy data if needed.
