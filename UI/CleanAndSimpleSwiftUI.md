@@ -736,3 +736,436 @@ private enum MintUI {
     }
 }
 ```
+
+
+\==== EXAMPLE 4 ====
+
+### A premium single-photo configuration screen with a glass-y control stack and progressive metadata. This takes the ideas from Example 1 (clean grid instead of a plain Form/List) and goes further with a compact image preview, a right-aligned “size” chip that expands to show extra details, and four summary cards that open focused sheets. It feels elegant without being flashy, and gracefully falls back on `.ultraThinMaterial` where system glass isn’t available.&#x20;
+
+```swift
+import SwiftUI
+
+// MARK: - Main View
+
+struct SinglePhotoConfigView: View {
+    // MARK: - Selection & Options
+    @State private var selectedFormat: String = "jpeg"
+    @State private var selectedQuality: Double = 0.85
+    @State private var selectedMaxDimension: Int? = nil
+    @State private var passes: Int = 1
+
+    // MARK: - UI State
+    @State private var isMetadataExpanded: Bool = false
+    @State private var showingFormatSheet = false
+    @State private var showingQualitySheet = false
+    @State private var showingMaxSizeSheet = false
+    @State private var showingOptionsSheet = false
+
+    // MARK: - Demo Data (for the doc preview)
+    let sampleFileSizeBytes: Int = 2_460_000
+    let samplePixelSize: CGSize = .init(width: 4032, height: 3024)
+
+    // MARK: - Body
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 28) {
+                    imagePreviewSection
+                    settingsGridSection
+                    compressButton
+                }
+                .padding()
+            }
+        }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("Configure Compression")
+        .navigationBarTitleDisplayMode(.inline)
+        // Sheets
+        .sheet(isPresented: $showingFormatSheet) { FormatSelectionSheet(selectedFormat: $selectedFormat) }
+        .sheet(isPresented: $showingQualitySheet) { QualityAdjustmentSheet(selectedQuality: $selectedQuality) }
+        .sheet(isPresented: $showingMaxSizeSheet) { MaxSizeInputSheet(selectedMaxDimension: $selectedMaxDimension) }
+        .sheet(isPresented: $showingOptionsSheet) { PassesSettingsSheet(passes: $passes) }
+    }
+
+    // MARK: - Sections
+
+    /// Image preview with a trailing “size” chip that expands to show more metadata.
+    private var imagePreviewSection: some View {
+        VStack(spacing: 16) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .frame(height: 220)
+                .overlay(
+                    Image(systemName: "photo.artframe")
+                        .font(.system(size: 56, weight: .regular))
+                        .foregroundColor(.secondary)
+                )
+
+            HStack(alignment: .bottom) {
+                // Left: a generic "Preset" entry point (wire up to your own sheet if desired)
+                Button {
+                    showingFormatSheet = true
+                } label: {
+                    Label("Preset", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(kind: .standard))
+
+                Spacer()
+
+                // Right: metadata stack
+                VStack(alignment: .trailing, spacing: 12) {
+                    Button {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            isMetadataExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(originalFileSize)
+                            Image(systemName: "chevron.up")
+                                .rotationEffect(.degrees(isMetadataExpanded ? 0 : 180))
+                        }
+                    }
+                    .buttonStyle(GlassCapsuleButtonStyle(kind: .standard))
+
+                    if isMetadataExpanded {
+                        HStack(spacing: 8) {
+                            CapsuleTag(text: "\(Int(samplePixelSize.width))x\(Int(samplePixelSize.height))")
+                            CapsuleTag(text: selectedFormat.uppercased())
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    /// Two-column grid of summary cards that open focused sheets.
+    private var settingsGridSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16),
+                                GridItem(.flexible(), spacing: 16)],
+                      spacing: 16) {
+                ConfigSummaryCard(
+                    icon: "photo",
+                    title: "Format",
+                    value: selectedFormat.uppercased(),
+                    detail: "Image format",
+                    accentColor: .blue
+                ) { showingFormatSheet = true }
+
+                ConfigSummaryCard(
+                    icon: "gauge",
+                    title: "Quality",
+                    value: "\(Int(selectedQuality * 100))%",
+                    detail: "Compression quality",
+                    accentColor: .green
+                ) { showingQualitySheet = true }
+
+                ConfigSummaryCard(
+                    icon: "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left",
+                    title: "Max Size",
+                    value: selectedMaxDimension.map { "\($0)p" } ?? "Full",
+                    detail: selectedMaxDimension == nil ? "Original resolution"
+                                                        : "Maximum dimension",
+                    accentColor: .orange
+                ) { showingMaxSizeSheet = true }
+
+                ConfigSummaryCard(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: "Passes",
+                    value: "\(passes)",
+                    detail: passes > 1 ? "Multi-pass" : "Single pass",
+                    accentColor: .teal
+                ) { showingOptionsSheet = true }
+            }
+        }
+    }
+
+    private var compressButton: some View {
+        Button {
+            // Hook up to your compression action
+        } label: {
+            Label("Compress", systemImage: "play.fill")
+                .font(.headline.weight(.bold))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(GlassCapsuleButtonStyle(kind: .prominent))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Helpers
+
+    private var originalFileSize: String {
+        let fmt = ByteCountFormatter()
+        fmt.allowedUnits = .useMB
+        fmt.countStyle = .file
+        return fmt.string(fromByteCount: Int64(sampleFileSizeBytes))
+    }
+}
+
+// MARK: - Reusable Pieces
+
+struct ConfigSummaryCard: View {
+    let icon: String
+    let title: String
+    let value: String
+    let detail: String
+    let accentColor: Color
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(accentColor)
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
+                Text(value)
+                    .font(.title3.weight(.bold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .frame(height: 120)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CapsuleTag: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 3)
+    }
+}
+
+// MARK: - Glass-like Button Styles (fallbacks friendly)
+
+enum GlassButtonKind { case standard, prominent }
+
+struct GlassCapsuleButtonStyle: ButtonStyle {
+    let kind: GlassButtonKind
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        return configuration.label
+            .padding(.horizontal, kind == .prominent ? 18 : 14)
+            .padding(.vertical, kind == .prominent ? 14 : 10)
+            .background(background(pressed: pressed))
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(kind == .prominent ? 0.22 : 0.20),
+                                  lineWidth: kind == .prominent ? 1 : 0.75)
+            )
+            .shadow(color: .black.opacity(kind == .prominent ? 0.22 : 0.15),
+                    radius: kind == .prominent ? 10 : 8,
+                    x: 0, y: kind == .prominent ? 6 : 4)
+            .scaleEffect(pressed ? 0.98 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .tint(kind == .prominent ? .white : .primary)
+    }
+
+    @ViewBuilder
+    private func background(pressed: Bool) -> some View {
+        switch kind {
+        case .standard:
+            Color.white.opacity(0.06)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().fill(.white.opacity(pressed ? 0.08 : 0.04)))
+        case .prominent:
+            LinearGradient(
+                colors: [Color.accentColor, Color.accentColor.opacity(0.88)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.35), lineWidth: 0.5)
+                    .blendMode(.overlay)
+            )
+            .overlay(Capsule().fill(.white.opacity(pressed ? 0.10 : 0.06)))
+        }
+    }
+}
+
+// MARK: - Sheets (focused, minimal)
+
+struct FormatSelectionSheet: View {
+    @Binding var selectedFormat: String
+    @Environment(\.dismiss) private var dismiss
+    private let formats = ["jpeg", "png", "heic"]
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(formats, id: \.self) { format in
+                    Button {
+                        selectedFormat = format; dismiss()
+                    } label: {
+                        HStack {
+                            Text(format.uppercased()).foregroundColor(.primary)
+                            Spacer()
+                            if selectedFormat == format {
+                                Image(systemName: "checkmark").foregroundColor(.blue)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Image Format")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+struct QualityAdjustmentSheet: View {
+    @Binding var selectedQuality: Double
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Compression Quality").font(.title2).fontWeight(.semibold)
+                Text("\(Int(selectedQuality * 100))%")
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundColor(.blue)
+                Slider(value: $selectedQuality, in: 0.1...1.0, step: 0.05)
+                    .padding(.horizontal)
+                HStack {
+                    Text("10%").foregroundColor(.secondary)
+                    Spacer()
+                    Text("100%").foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Quality")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+struct MaxSizeInputSheet: View {
+    @Binding var selectedMaxDimension: Int?
+    @Environment(\.dismiss) private var dismiss
+    @State private var inputText: String = ""
+    @State private var isUnlimited: Bool = true
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Maximum Dimension").font(.title2).fontWeight(.semibold)
+
+                Toggle("Unlimited (Original Resolution)", isOn: $isUnlimited)
+                    .padding(.horizontal)
+
+                if !isUnlimited {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Maximum dimension in pixels:").font(.headline)
+                        TextField("e.g., 1920", text: $inputText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .keyboardType(.numberPad)
+                            .padding(.horizontal)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Max Size")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        if isUnlimited {
+                            selectedMaxDimension = nil
+                        } else if let value = Int(inputText), value > 0 {
+                            selectedMaxDimension = value
+                        }
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                if let maxDim = selectedMaxDimension {
+                    isUnlimited = false
+                    inputText = String(maxDim)
+                } else {
+                    isUnlimited = true
+                    inputText = ""
+                }
+            }
+        }
+    }
+}
+
+struct PassesSettingsSheet: View {
+    @Binding var passes: Int
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                Text("Compression Passes").font(.title2).fontWeight(.semibold)
+                Text("More passes can improve results but take longer.")
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                HStack(spacing: 0) {
+                    Button {
+                        if passes > 1 { withAnimation { passes -= 1 } }
+                    } label: { Image(systemName: "minus").padding() }
+                        .disabled(passes <= 1)
+
+                    Text("\(passes)")
+                        .font(.title.weight(.bold))
+                        .frame(minWidth: 56)
+                        .contentTransition(.numericText())
+
+                    Button {
+                        if passes < 10 { withAnimation { passes += 1 } }
+                    } label: { Image(systemName: "plus").padding() }
+                }
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(Capsule())
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Passes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    NavigationStack {
+        SinglePhotoConfigView()
+    }
+}
+``
