@@ -56,8 +56,8 @@ var body: some View {
     }
 }
 
-private var profileHeader: some View { ... }
-private var aboutSection: some View { ... }
+@ViewBuilder private var profileHeader: some View { ... }
+@ViewBuilder private var aboutSection: some View { ... }
 ```
 
 **Exceptions:**
