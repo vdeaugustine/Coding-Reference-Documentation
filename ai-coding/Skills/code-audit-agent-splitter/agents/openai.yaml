@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Audit Agent Splitter"
+  short_description: "Production code audits with merge-safe agent work units."
+  default_prompt: "Use $code-audit-agent-splitter to audit this codebase and produce independent agent prompts grouped by non-overlapping file ownership."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xcode Compile Fixer"
+  short_description: "Build all schemes/platforms and fix issues."
+  default_prompt: "Run xcodebuild for every scheme and platform, then fix each warning and error until all builds are clean."

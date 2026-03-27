@@ -1,0 +1,6 @@
+interface:
+  display_name: "Firebase Hosting Deploy"
+  short_description: "Deploy sites to Firebase Hosting"
+  icon_small: "./assets/firebase.png"
+  icon_large: "./assets/firebase.png"
+  default_prompt: "Use $firebase-hosting-deployment to confirm the branch, build, and deploy a site to Firebase Hosting."

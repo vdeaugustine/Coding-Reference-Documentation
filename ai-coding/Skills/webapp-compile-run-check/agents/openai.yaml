@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: Webapp Compile & Run Check
+  short_description: Build and startup health checks for web apps.
+  default_prompt: Run a fast compile and startup health check for the current web app, report failures with likely fixes, and keep checks minimal unless deeper validation is requested.

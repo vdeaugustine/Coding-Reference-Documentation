@@ -1,0 +1,4 @@
+interface:
+  display_name: "Subagent Workflow"
+  short_description: "Decompose tasks into parallel agents"
+  default_prompt: "Use $subagent-workflow to split this task into safe parallel agent work and consolidate the results."

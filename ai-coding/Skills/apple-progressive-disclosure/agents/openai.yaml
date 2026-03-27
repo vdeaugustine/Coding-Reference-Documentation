@@ -1,0 +1,6 @@
+interface:
+  display_name: "Apple Progressive Disclosure"
+  short_description: "Apple-style scroll-first UX patterns"
+  icon_small: "./assets/apple-computer-logo-rainbow.svg"
+  icon_large: "./assets/apple-computer-logo-rainbow.svg"
+  default_prompt: "Use $apple-progressive-disclosure to design and implement Apple-style progressive disclosure patterns for this web page."

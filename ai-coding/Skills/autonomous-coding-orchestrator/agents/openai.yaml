@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autonomous Coding Orchestrator"
+  short_description: "Split coding work into safe parallel agents"
+  default_prompt: "Use $autonomous-coding-orchestrator to execute this coding task autonomously with safe parallel subagents."

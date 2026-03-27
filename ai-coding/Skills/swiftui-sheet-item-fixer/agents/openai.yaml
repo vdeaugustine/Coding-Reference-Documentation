@@ -1,0 +1,4 @@
+interface:
+  display_name: "SwiftUI Sheet Item Fixer"
+  short_description: "Fix optional-data SwiftUI sheets safely."
+  default_prompt: "Scan the workspace for SwiftUI .sheet(isPresented:) patterns using optional selected state, migrate safe cases to .sheet(item:), and validate with xcodebuild."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "UX Design Expert"
+  short_description: "Award-grade UX/UI design guidance for mobile and web."
+  default_prompt: "Design an end-to-end UX/UI solution with concrete visual specs, interaction details, accessibility requirements, and rationale aligned to user goals."

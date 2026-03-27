@@ -8,7 +8,7 @@ Personal reference notes, prompts, and reusable snippets. Everything is grouped 
 |--------|---------|
 | **swift-platform/** | Apple and Swift stack: concurrency, SwiftUI, SwiftData, testing, StoreKit, iMessage, media, icons, Xcode fixes |
 | **design-ui/** | Visual design notes, HIG Liquid Glass, SwiftUI style recipes, design kit links |
-| **ai-coding/** | Cursor, Claude, agentic workflows, global AI rules, Swift-specific Cursor rules, skills, audits, vibe coding |
+| **ai-coding/** | Cursor, Claude, AgenticCoding (rules, workflows, guides), global AI rules, Swift Cursor rules, Codex-style **Skills** packs, audits, vibe coding |
 | **prompts/** | Reusable prompts (GPT practices, JSON prompting, product building, checkpoints, context helpers) |
 | **planning/** | Roadmaps and requirements writing |
 | **reference/** | Long-form reference, storytelling, outlining, git and worktrees, workflow notes, Sora reference |
@@ -30,9 +30,24 @@ Personal reference notes, prompts, and reusable snippets. Everything is grouped 
 
 ## AI coding (`ai-coding/`)
 
-- `Cursor/`, `Claude/`, `AgenticCoding/` for editor and agent setup
-- Rules: `GeneralAICodingRules.md`, `GeneralCursorRules.md`, `SwiftCursorRules.md`
-- `AI-Agent-Skills-Guide.md`, `Skills/`, `CodeAudit.md`, `VibeCoding.md`
+- **Editors and agents:** `Cursor/`, `Claude/`, `AgenticCoding/` (guides, hooks, subagents)
+- **Shared rules (markdown):** `GeneralAICodingRules.md`, `GeneralCursorRules.md`, `SwiftCursorRules.md`
+- **AgenticCoding rules:** `AgenticCoding/rules/compile.md`, `AgenticCoding/rules/gather.md`
+- **AgenticCoding workflows:** `AgenticCoding/workflows/`  
+  `code-audit.md`, `compile-all.md`, `compile-apple.md`, `do-not-build.md`, `do-not-test.md`, `init-all.md`, `init-apple.md`, `ui-ux-designer.md`
+- **Top-level references:** `AI-Agent-Skills-Guide.md`, `CodeAudit.md`, `VibeCoding.md`
+
+### Skills (`ai-coding/Skills/`)
+
+Reusable skill packages (each folder is typically `SKILL.md` plus agents, assets, scripts). Flat files at the root of `Skills/` are quick notes: `Debugging.md`, `PerfectionistCodeAuditor.md`.
+
+| Theme | Skill folders |
+|-------|----------------|
+| Apple / Swift | `apple-progressive-disclosure`, `liquid-glass`, `swiftui-sheet-item-fixer`, `xcode-compile-fixer` |
+| Agents / process | `autonomous-coding-orchestrator`, `subagent-workflow`, `character-profile`, `code-audit-agent-splitter` |
+| Web / deploy | `compile`, `firebase-hosting-deployment`, `vercel-deploy`, `webapp-compile-run-check` |
+| Git / CI | `git-commit`, `gh-fix-ci`, `merge-conflict-minimal-resolver` |
+| Design / media | `ux-design-expert`, `remotion-video-skill-main` |
 
 ## Prompts (`prompts/`)
 
@@ -53,4 +68,4 @@ Personal reference notes, prompts, and reusable snippets. Everything is grouped 
 
 ---
 
-*Last reorganized: grouped by topic with `git mv` so history is preserved.*
+*Latest update reflected here: AgenticCoding **rules** (`compile`, `gather`), **workflows** (audit, compile, init, UI/UX, guardrails), and expanded **Skills** (folder-based packs with scripts and assets). Earlier top-level grouping used `git mv` so history is preserved.*

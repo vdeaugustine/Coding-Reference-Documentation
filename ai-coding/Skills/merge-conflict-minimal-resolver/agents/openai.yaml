@@ -1,0 +1,4 @@
+interface:
+  display_name: "Merge Conflict Minimal Resolver"
+  short_description: "Least-invasive merge conflict resolution."
+  default_prompt: "Resolve merge conflicts minimally: preserve both sides where possible, synthesize compatible changes, and choose the best side only when coexistence is impossible."
